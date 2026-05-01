@@ -30,6 +30,7 @@ type AutopilotResponse struct {
 	Status             string  `json:"status"`
 	ExecutionMode      string  `json:"execution_mode"`
 	IssueTitleTemplate *string `json:"issue_title_template"`
+	ProjectID          *string `json:"project_id"`
 	CreatedByType      string  `json:"created_by_type"`
 	CreatedByID        string  `json:"created_by_id"`
 	LastRunAt          *string `json:"last_run_at"`
@@ -80,6 +81,7 @@ func autopilotToResponse(a db.Autopilot) AutopilotResponse {
 		Status:             a.Status,
 		ExecutionMode:      a.ExecutionMode,
 		IssueTitleTemplate: textToPtr(a.IssueTitleTemplate),
+		ProjectID:          uuidToPtr(a.ProjectID),
 		CreatedByType:      a.CreatedByType,
 		CreatedByID:        uuidToString(a.CreatedByID),
 		LastRunAt:          timestampToPtr(a.LastRunAt),
@@ -139,6 +141,7 @@ type CreateAutopilotRequest struct {
 	AssigneeID         string  `json:"assignee_id"`
 	ExecutionMode      string  `json:"execution_mode"`
 	IssueTitleTemplate *string `json:"issue_title_template"`
+	ProjectID          *string `json:"project_id"`
 }
 
 type UpdateAutopilotRequest struct {
@@ -148,6 +151,7 @@ type UpdateAutopilotRequest struct {
 	Status             *string `json:"status"`
 	ExecutionMode      *string `json:"execution_mode"`
 	IssueTitleTemplate *string `json:"issue_title_template"`
+	ProjectID          *string `json:"project_id"`
 }
 
 type CreateAutopilotTriggerRequest struct {
@@ -286,6 +290,15 @@ func (h *Handler) CreateAutopilot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var projectID pgtype.UUID
+	if req.ProjectID != nil {
+		pid, ok := parseUUIDOrBadRequest(w, *req.ProjectID, "project_id")
+		if !ok {
+			return
+		}
+		projectID = pid
+	}
+
 	autopilot, err := h.Queries.CreateAutopilot(r.Context(), db.CreateAutopilotParams{
 		WorkspaceID:        wsUUID,
 		Title:              req.Title,
@@ -296,6 +309,7 @@ func (h *Handler) CreateAutopilot(w http.ResponseWriter, r *http.Request) {
 		CreatedByID:        parseUUID(userID),
 		Description:        ptrToText(req.Description),
 		IssueTitleTemplate: ptrToText(req.IssueTitleTemplate),
+		ProjectID:          projectID,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create autopilot")
@@ -339,6 +353,7 @@ func (h *Handler) UpdateAutopilot(w http.ResponseWriter, r *http.Request) {
 		Description:        prev.Description,
 		AssigneeID:         prev.AssigneeID,
 		IssueTitleTemplate: prev.IssueTitleTemplate,
+		ProjectID:          prev.ProjectID,
 	}
 	if req.Title != nil {
 		params.Title = pgtype.Text{String: *req.Title, Valid: true}
@@ -369,6 +384,17 @@ func (h *Handler) UpdateAutopilot(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			params.AssigneeID = assigneeUUID
+		}
+	}
+	if _, ok := rawFields["project_id"]; ok {
+		if req.ProjectID != nil {
+			pid, ok := parseUUIDOrBadRequest(w, *req.ProjectID, "project_id")
+			if !ok {
+				return
+			}
+			params.ProjectID = pid
+		} else {
+			params.ProjectID = pgtype.UUID{Valid: false}
 		}
 	}
 

@@ -65,4 +65,21 @@ echo ""
 trap 'kill 0' EXIT
 (cd server && go run ./cmd/server) &
 pnpm dev:web &
+
+# Wait briefly for the backend to be ready, then ensure the daemon is running.
+(
+  for i in $(seq 1 15); do
+    if curl -sf http://localhost:${PORT:-8080}/health > /dev/null 2>&1; then
+      break
+    fi
+    sleep 1
+  done
+  if (cd server && go run ./cmd/multica daemon status 2>&1 | grep -q "stopped"); then
+    echo "==> Daemon is not running. Starting daemon..."
+    (cd server && go run ./cmd/multica daemon start)
+  else
+    echo "==> Daemon is already running."
+  fi
+) &
+
 wait

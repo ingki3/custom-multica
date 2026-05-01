@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -218,6 +220,125 @@ func ReuseCustomFolder(folderPath, provider, codexVersion string, task TaskConte
 
 	logger.Info("execenv: using custom working folder", "path", folderPath)
 	return env
+}
+
+// ReuseCustomFolderIsolated creates an isolated git worktree from a custom
+// working folder so multiple tasks can work on the same project concurrently.
+// Returns nil if the folder is not a git repository (caller should requeue).
+func ReuseCustomFolderIsolated(folderPath, provider, codexVersion, taskID, agentName string, task TaskContextForEnv, logger *slog.Logger) *Environment {
+	gitRoot, isGit := detectGitRepo(folderPath)
+	if !isGit {
+		logger.Info("execenv: custom folder is not a git repo, cannot isolate", "path", folderPath)
+		return nil
+	}
+
+	// Best-effort fetch so the worktree starts from the latest remote state.
+	if err := fetchOrigin(gitRoot); err != nil {
+		logger.Warn("execenv: fetch origin failed (continuing with local state)", "error", err)
+	}
+
+	baseRef := getRemoteDefaultBranch(gitRoot)
+	sid := shortID(taskID)
+	worktreePath := filepath.Join(folderPath, ".multica_worktrees", sid)
+	branchName := fmt.Sprintf("agent/%s/%s", sanitizeBranchName(agentName), sid)
+
+	// Ensure parent directory exists.
+	if err := os.MkdirAll(filepath.Dir(worktreePath), 0o755); err != nil {
+		logger.Warn("execenv: create worktree parent dir failed", "error", err)
+		return nil
+	}
+
+	if err := setupGitWorktree(gitRoot, worktreePath, branchName, baseRef); err != nil {
+		logger.Warn("execenv: setup isolated worktree failed", "error", err)
+		return nil
+	}
+
+	// Exclude .agent_context from the worktree's git tracking.
+	if err := excludeFromGit(worktreePath, ".agent_context"); err != nil {
+		logger.Warn("execenv: exclude .agent_context failed (non-fatal)", "error", err)
+	}
+
+	// Also exclude .multica_worktrees from the base repo.
+	if err := excludeFromGit(folderPath, ".multica_worktrees"); err != nil {
+		logger.Warn("execenv: exclude .multica_worktrees failed (non-fatal)", "error", err)
+	}
+
+	env := &Environment{
+		RootDir: "", // empty = don't GC this directory
+		WorkDir: worktreePath,
+		logger:  logger,
+	}
+
+	// Write context files into the worktree.
+	if err := writeContextFiles(worktreePath, provider, task); err != nil {
+		logger.Warn("execenv: write context files to isolated worktree failed", "error", err)
+	}
+
+	// Handle Codex provider.
+	if provider == "codex" {
+		codexHome := filepath.Join(worktreePath, ".agent_context", "codex-home")
+		if err := prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{CodexVersion: codexVersion}, logger); err != nil {
+			logger.Warn("execenv: prepare codex-home in isolated worktree failed", "error", err)
+		} else {
+			env.CodexHome = codexHome
+			if err := writeCodexWorkspaceSkills(codexHome, task.AgentSkills); err != nil {
+				logger.Warn("execenv: write codex skills in isolated worktree failed", "error", err)
+			}
+		}
+	}
+
+	logger.Info("execenv: using isolated worktree", "base", folderPath, "worktree", worktreePath, "branch", branchName)
+	return env
+}
+
+// CleanupIsolatedWorktree commits any uncommitted changes in the worktree,
+// then removes the worktree directory. The git branch is kept for user review / PR.
+func CleanupIsolatedWorktree(worktreePath string, logger *slog.Logger) {
+	// Find the git root of the base repo (parent of .multica_worktrees/).
+	// worktreePath looks like: {folderPath}/.multica_worktrees/{shortID}/
+	parts := strings.Split(filepath.ToSlash(worktreePath), "/.multica_worktrees/")
+	if len(parts) < 2 {
+		logger.Warn("execenv: cannot determine git root from worktree path", "path", worktreePath)
+		return
+	}
+	gitRoot, isGit := detectGitRepo(parts[0])
+	if !isGit {
+		logger.Warn("execenv: base folder is not a git repo, removing worktree directory directly", "path", worktreePath)
+		os.RemoveAll(worktreePath)
+		return
+	}
+
+	// Auto-commit any uncommitted changes so they survive worktree removal.
+	// Without this, `git worktree remove --force` discards all work.
+	statusCmd := exec.Command("git", "-C", worktreePath, "status", "--porcelain")
+	if out, err := statusCmd.Output(); err == nil && len(strings.TrimSpace(string(out))) > 0 {
+		logger.Info("execenv: auto-committing uncommitted changes in worktree", "path", worktreePath)
+		addCmd := exec.Command("git", "-C", worktreePath, "add", "-A")
+		if addOut, err := addCmd.CombinedOutput(); err != nil {
+			logger.Warn("execenv: git add failed in worktree", "output", strings.TrimSpace(string(addOut)), "error", err)
+		} else {
+			commitCmd := exec.Command("git", "-C", worktreePath, "commit", "-m", "chore: auto-commit agent work before worktree cleanup")
+			if commitOut, err := commitCmd.CombinedOutput(); err != nil {
+				logger.Warn("execenv: git commit failed in worktree", "output", strings.TrimSpace(string(commitOut)), "error", err)
+			} else {
+				logger.Info("execenv: auto-committed changes in worktree")
+			}
+		}
+	}
+
+	// Remove the worktree but keep the branch.
+	cmd := exec.Command("git", "-C", gitRoot, "worktree", "remove", "--force", worktreePath)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		logger.Warn("execenv: git worktree remove failed, falling back to rm", "output", strings.TrimSpace(string(out)), "error", err)
+		os.RemoveAll(worktreePath)
+	}
+	logger.Info("execenv: cleaned up isolated worktree", "path", worktreePath)
+}
+
+// sanitizeBranchName replaces characters invalid in git branch names.
+func sanitizeBranchName(name string) string {
+	replacer := strings.NewReplacer(" ", "-", "/", "-", "\\", "-", "..", "-", "~", "-", "^", "-", ":", "-")
+	return replacer.Replace(name)
 }
 
 func writeCodexWorkspaceSkills(codexHome string, skills []SkillContextForEnv) error {

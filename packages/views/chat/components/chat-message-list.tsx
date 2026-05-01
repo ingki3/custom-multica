@@ -58,7 +58,8 @@ export function ChatMessageList({
 
   // Live timeline for the in-flight task. useRealtimeSync keeps this cache
   // current via setQueryData on task:message events.
-  const showLiveTimeline = !!pendingTaskId && !pendingAlreadyPersisted;
+  const isOptimisticTask = !!pendingTaskId && pendingTaskId.startsWith("optimistic-");
+  const showLiveTimeline = !!pendingTaskId && !pendingAlreadyPersisted && !isOptimisticTask;
   const { data: liveTaskMessages } = useQuery({
     ...taskMessagesOptions(pendingTaskId ?? ""),
     enabled: showLiveTimeline,

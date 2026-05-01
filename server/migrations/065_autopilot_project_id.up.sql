@@ -1,0 +1,1 @@
+ALTER TABLE autopilot ADD COLUMN project_id UUID REFERENCES project(id) ON DELETE SET NULL;

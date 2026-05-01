@@ -133,10 +133,18 @@ export function PropertyPicker({
     [getItems, highlightedIndex],
   );
 
+  // When the caller provides a custom render element that is NOT a <button>,
+  // set nativeButton=false so Base UI doesn't warn about the mismatch.
+  const isNonButtonRender =
+    triggerRender != null &&
+    typeof triggerRender.type === "string" &&
+    triggerRender.type !== "button";
+
   const popoverTrigger = (
     <PopoverTrigger
       className={triggerRender ? undefined : "flex items-center gap-1.5 cursor-pointer rounded px-1 -mx-1 hover:bg-accent/30 transition-colors overflow-hidden"}
       render={triggerRender}
+      {...(isNonButtonRender ? { nativeButton: false } : {})}
     >
       {trigger}
     </PopoverTrigger>

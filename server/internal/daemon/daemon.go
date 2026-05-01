@@ -24,6 +24,11 @@ import (
 // server refresh.
 var ErrRepoNotConfigured = errors.New("repo is not configured for this workspace")
 
+// ErrWorkingFolderBusy is returned by runTask when the target working folder
+// is already in use by another task and cannot be isolated (non-git folder).
+// handleTask catches this and requeues the task for later retry.
+var ErrWorkingFolderBusy = errors.New("working folder is busy")
+
 // workspaceState tracks registered runtimes for a single workspace.
 type workspaceState struct {
 	workspaceID     string
@@ -57,6 +62,12 @@ type Daemon struct {
 	restartBinary string             // non-empty after a successful update; path to the new binary
 	updating      atomic.Bool        // prevents concurrent update attempts
 	activeTasks   atomic.Int64       // number of tasks currently in handleTask; exposed via /health
+
+	// workingFolderTasks tracks how many active tasks are using each custom
+	// working folder path. Used to detect concurrent access and trigger
+	// git-worktree isolation or non-git requeuing.
+	workingFolderMu    sync.Mutex
+	workingFolderTasks map[string]int
 }
 
 // New creates a new Daemon instance.
@@ -67,15 +78,16 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 	// server can split logs/metrics by client version (parallel to the CLI).
 	client.SetVersion(cfg.CLIVersion)
 	return &Daemon{
-		cfg:           cfg,
-		client:        client,
-		repoCache:     repocache.New(cacheRoot, logger),
-		logger:        logger,
-		workspaces:    make(map[string]*workspaceState),
-		runtimeIndex:  make(map[string]Runtime),
-		runtimeSetCh:  make(chan struct{}, 1),
-		agentVersions: make(map[string]string),
-		wsHBLastAck:   make(map[string]time.Time),
+		cfg:                cfg,
+		client:             client,
+		repoCache:          repocache.New(cacheRoot, logger),
+		logger:             logger,
+		workspaces:         make(map[string]*workspaceState),
+		runtimeIndex:       make(map[string]Runtime),
+		runtimeSetCh:       make(chan struct{}, 1),
+		agentVersions:      make(map[string]string),
+		wsHBLastAck:        make(map[string]time.Time),
+		workingFolderTasks: make(map[string]int),
 	}
 }
 
@@ -85,6 +97,27 @@ func (d *Daemon) setAgentVersion(provider, version string) {
 	d.versionsMu.Lock()
 	defer d.versionsMu.Unlock()
 	d.agentVersions[provider] = version
+}
+
+// acquireWorkingFolder increments the active-task counter for a custom working
+// folder path and returns the new count. A count of 1 means this is the only
+// task using the folder (no isolation needed).
+func (d *Daemon) acquireWorkingFolder(path string) int {
+	d.workingFolderMu.Lock()
+	defer d.workingFolderMu.Unlock()
+	d.workingFolderTasks[path]++
+	return d.workingFolderTasks[path]
+}
+
+// releaseWorkingFolder decrements the active-task counter for a custom working
+// folder path. Must be called when the task finishes (via defer).
+func (d *Daemon) releaseWorkingFolder(path string) {
+	d.workingFolderMu.Lock()
+	defer d.workingFolderMu.Unlock()
+	d.workingFolderTasks[path]--
+	if d.workingFolderTasks[path] <= 0 {
+		delete(d.workingFolderTasks, path)
+	}
 }
 
 // agentVersion returns the last-detected CLI version for an agent provider,
@@ -1038,6 +1071,13 @@ func (d *Daemon) handleTask(ctx context.Context, task Task) {
 	}
 
 	if err != nil {
+		if errors.Is(err, ErrWorkingFolderBusy) {
+			taskLog.Info("working folder busy, requeueing task for later retry", "folder", task.WorkingFolder)
+			if reqErr := d.client.RequeueTask(ctx, task.ID); reqErr != nil {
+				taskLog.Error("requeue task failed", "error", reqErr)
+			}
+			return
+		}
 		taskLog.Error("task failed", "error", err)
 		// runTask returned without a TaskResult, so we don't have a SessionID
 		// to forward — best we can do is record the failure.
@@ -1085,6 +1125,12 @@ func (d *Daemon) handleTask(ctx context.Context, task Task) {
 				taskLog.Error("fail task fallback also failed", "error", failErr)
 			}
 		}
+	}
+
+	// Clean up git worktrees created for concurrent working-folder isolation.
+	// The worktree directory is removed but the branch is kept for user review.
+	if result.WorkDir != "" && strings.Contains(result.WorkDir, ".multica_worktrees") {
+		execenv.CleanupIsolatedWorktree(result.WorkDir, taskLog)
 	}
 
 	// Write GC metadata after the task finishes so the periodic GC loop
@@ -1151,9 +1197,22 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 	var env *execenv.Environment
 	codexVersion := d.agentVersion("codex")
 	if task.WorkingFolder != "" {
-		env = execenv.ReuseCustomFolder(task.WorkingFolder, provider, codexVersion, taskCtx, d.logger)
-		if env == nil {
-			return TaskResult{}, fmt.Errorf("working_folder %q does not exist or is not writable", task.WorkingFolder)
+		count := d.acquireWorkingFolder(task.WorkingFolder)
+		defer d.releaseWorkingFolder(task.WorkingFolder)
+
+		if count > 1 {
+			// Another task is already using this folder — isolate via git worktree.
+			env = execenv.ReuseCustomFolderIsolated(task.WorkingFolder, provider, codexVersion, task.ID, agentName, taskCtx, d.logger)
+			if env == nil {
+				// Non-git folder — cannot isolate, requeue for later.
+				return TaskResult{}, ErrWorkingFolderBusy
+			}
+			taskLog.Info("using isolated worktree for concurrent access", "base", task.WorkingFolder, "worktree", env.WorkDir)
+		} else {
+			env = execenv.ReuseCustomFolder(task.WorkingFolder, provider, codexVersion, taskCtx, d.logger)
+			if env == nil {
+				return TaskResult{}, fmt.Errorf("working_folder %q does not exist or is not writable", task.WorkingFolder)
+			}
 		}
 	} else if task.PriorWorkDir != "" {
 		env = execenv.Reuse(task.PriorWorkDir, provider, codexVersion, taskCtx, d.logger)

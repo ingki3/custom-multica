@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef } from "react";
-import { ChevronRight, Maximize2, Minimize2, X as XIcon, UserMinus } from "lucide-react";
+import { ChevronRight, FolderOpen, Maximize2, Minimize2, X as XIcon, UserMinus } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { useCreateProject } from "@multica/core/projects/mutations";
 import {
@@ -32,6 +32,7 @@ import { ContentEditor, type ContentEditorRef, TitleEditor } from "../editor";
 import { PriorityIcon } from "../issues/components/priority-icon";
 import { ActorAvatar } from "../common/actor-avatar";
 import { useNavigation } from "../navigation";
+import { FolderPickerDialog } from "../common/folder-picker-dialog";
 
 function PillButton({
   children,
@@ -72,6 +73,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
   const [icon, setIcon] = useState<string | undefined>();
   const [workingFolder, setWorkingFolder] = useState("");
   const [iconPickerOpen, setIconPickerOpen] = useState(false);
+  const [folderPickerOpen, setFolderPickerOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
 
@@ -345,16 +347,48 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
 
         <div className="px-4 pb-3">
           <label className="text-xs text-muted-foreground mb-1 block">Working Folder</label>
-          <input
-            type="text"
-            value={workingFolder}
-            onChange={(e) => setWorkingFolder(e.target.value)}
-            placeholder="/path/to/project"
-            className="w-full rounded-md border bg-transparent px-3 py-1.5 text-sm placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-ring"
-          />
+          <div className="flex items-center gap-1.5">
+            <input
+              type="text"
+              value={workingFolder}
+              onChange={(e) => setWorkingFolder(e.target.value)}
+              placeholder="/path/to/project"
+              className="flex-1 rounded-md border bg-transparent px-3 py-1.5 text-sm placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-ring"
+            />
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <button
+                    type="button"
+                    className="shrink-0 rounded-md border p-1.5 hover:bg-accent/60 transition-colors cursor-pointer"
+                    onClick={async () => {
+                      const desktopAPI = typeof window !== "undefined"
+                        ? (window as unknown as { desktopAPI?: { selectFolder?: () => Promise<string | null> } }).desktopAPI
+                        : undefined;
+                      if (desktopAPI?.selectFolder) {
+                        const folder = await desktopAPI.selectFolder();
+                        if (folder) setWorkingFolder(folder);
+                      } else {
+                        setFolderPickerOpen(true);
+                      }
+                    }}
+                  >
+                    <FolderOpen className="size-4 text-muted-foreground" />
+                  </button>
+                }
+              />
+              <TooltipContent side="top">Browse folder</TooltipContent>
+            </Tooltip>
+          </div>
           <p className="text-xs text-muted-foreground mt-1">
             Local path on the daemon machine where agents will work.
           </p>
+          <FolderPickerDialog
+            open={folderPickerOpen}
+            onOpenChange={setFolderPickerOpen}
+            onSelect={setWorkingFolder}
+            initialPath={workingFolder || undefined}
+          />
         </div>
 
         <div className="flex items-center justify-end px-4 py-3 border-t shrink-0">
