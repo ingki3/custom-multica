@@ -995,6 +995,14 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 						}
 					}
 				}
+				// Propagate project-level working_folder for run_only autopilots.
+				if ap.ProjectID.Valid && resp.WorkingFolder == "" {
+					if proj, err := h.Queries.GetProject(r.Context(), ap.ProjectID); err == nil {
+						if proj.WorkingFolder.Valid {
+							resp.WorkingFolder = proj.WorkingFolder.String
+						}
+					}
+				}
 			}
 		}
 	}
