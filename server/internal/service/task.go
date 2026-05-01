@@ -525,11 +525,29 @@ func (s *TaskService) maybeLogClaimSlow(agentID pgtype.UUID, outcome string, sta
 }
 
 // StartTask transitions a dispatched task to running.
-// Issue status is NOT changed here — the agent manages it via the CLI.
+// Auto-transitions the issue to in_progress if it's currently todo or backlog.
 func (s *TaskService) StartTask(ctx context.Context, taskID pgtype.UUID) (*db.AgentTaskQueue, error) {
 	task, err := s.Queries.StartAgentTask(ctx, taskID)
 	if err != nil {
 		return nil, fmt.Errorf("start task: %w", err)
+	}
+
+	// Auto-transition: issue → in_progress when task starts running.
+	// Only from todo/backlog — don't override if agent/user already moved it.
+	if task.IssueID.Valid {
+		if issue, err := s.Queries.GetIssue(ctx, task.IssueID); err == nil {
+			if issue.Status == "todo" || issue.Status == "backlog" {
+				if updated, err := s.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
+					ID:     task.IssueID,
+					Status: "in_progress",
+				}); err != nil {
+					slog.Warn("auto-transition to in_progress failed", "issue_id", util.UUIDToString(task.IssueID), "error", err)
+				} else {
+					slog.Info("auto-transitioned issue to in_progress", "issue_id", util.UUIDToString(task.IssueID))
+					s.broadcastIssueUpdated(updated)
+				}
+			}
+		}
 	}
 
 	slog.Info("task started", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(task.IssueID))
@@ -670,6 +688,25 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 			}
 		}
 		s.broadcastChatDone(ctx, task)
+	}
+
+	// Auto-transition: issue → in_review when task completes successfully.
+	// Only from in_progress — don't override done/blocked/in_review
+	// (the agent may have already changed it via CLI during execution).
+	if task.IssueID.Valid {
+		if issue, err := s.Queries.GetIssue(ctx, task.IssueID); err == nil {
+			if issue.Status == "in_progress" {
+				if updated, err := s.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
+					ID:     task.IssueID,
+					Status: "in_review",
+				}); err != nil {
+					slog.Warn("auto-transition to in_review failed", "issue_id", util.UUIDToString(task.IssueID), "error", err)
+				} else {
+					slog.Info("auto-transitioned issue to in_review", "issue_id", util.UUIDToString(task.IssueID))
+					s.broadcastIssueUpdated(updated)
+				}
+			}
+		}
 	}
 
 	// Reconcile agent status
