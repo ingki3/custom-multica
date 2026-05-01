@@ -233,6 +233,18 @@ start: ## Start backend and frontend for the current checkout and run migrations
 	@trap 'kill 0' EXIT; \
 		(cd server && go run ./cmd/server) & \
 		pnpm dev:web & \
+		( \
+			for i in $$(seq 1 15); do \
+				curl -sf http://localhost:$(PORT)/health > /dev/null 2>&1 && break; \
+				sleep 1; \
+			done; \
+			if (cd server && go run ./cmd/multica daemon status 2>&1 | grep -q "stopped"); then \
+				echo "==> Daemon is not running. Starting daemon..."; \
+				cd server && go run ./cmd/multica daemon start; \
+			else \
+				echo "==> Daemon is already running."; \
+			fi \
+		) & \
 		wait
 
 stop: ## Stop backend and frontend processes for the current checkout
@@ -334,10 +346,24 @@ check-worktree: ## Run the full verification pipeline for this worktree
 dev: ## Bootstrap this checkout end-to-end: create env if needed, ensure DB, migrate, start services
 	@bash scripts/dev.sh
 
-server: ## Run only the Go server for the current checkout
+server: ## Run only the Go server for the current checkout (also ensures daemon is running)
 	$(REQUIRE_ENV)
 	@bash scripts/ensure-postgres.sh "$(ENV_FILE)"
-	cd server && go run ./cmd/server
+	@trap 'kill 0' EXIT; \
+		(cd server && go run ./cmd/server) & \
+		( \
+			for i in $$(seq 1 15); do \
+				curl -sf http://localhost:$(PORT)/health > /dev/null 2>&1 && break; \
+				sleep 1; \
+			done; \
+			if (cd server && go run ./cmd/multica daemon status 2>&1 | grep -q "stopped"); then \
+				echo "==> Daemon is not running. Starting daemon..."; \
+				cd server && go run ./cmd/multica daemon start; \
+			else \
+				echo "==> Daemon is already running."; \
+			fi \
+		) & \
+		wait
 
 daemon: ## Restart the local agent daemon using the CLI's stored auth/session
 	@$(MAKE) multica MULTICA_ARGS="daemon restart --profile local"

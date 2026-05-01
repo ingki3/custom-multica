@@ -34,6 +34,24 @@ export function buildAnchorMarkdown(anchor: ContextAnchor): string {
 }
 
 /**
+ * Build a markdown prefix for the explicitly selected project context.
+ * Unlike buildAnchorMarkdown (focus mode), this is always prepended when
+ * a project is selected in the chat, regardless of the current page.
+ */
+export function buildProjectContextMarkdown(project: {
+  id: string;
+  title: string;
+  description?: string | null;
+  working_folder?: string | null;
+}): string {
+  let md = `Project: "${project.title}"`;
+  if (project.working_folder) {
+    md += ` (folder: ${project.working_folder})`;
+  }
+  return md;
+}
+
+/**
  * Resolve the current page into an anchorable candidate, or null if the user
  * is somewhere without a natural focus object. Subscribes via react-query so
  * the result updates the instant the relevant cache fills.

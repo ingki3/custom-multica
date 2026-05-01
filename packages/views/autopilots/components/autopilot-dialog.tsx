@@ -36,6 +36,7 @@ import { TimezonePicker } from "./pickers/timezone-picker";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { agentListOptions } from "@multica/core/workspace/queries";
+import { projectListOptions } from "@multica/core/projects/queries";
 import {
   useCreateAutopilot,
   useCreateAutopilotTrigger,
@@ -67,6 +68,7 @@ export interface AutopilotInitial {
   description: string;
   assignee_id: string;
   execution_mode: AutopilotExecutionMode;
+  project_id?: string | null;
 }
 
 export type AutopilotDialogProps =
@@ -245,6 +247,7 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
   const workspaceName = useCurrentWorkspace()?.name;
   const wsId = useWorkspaceId();
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
+  const { data: projects = [] } = useQuery(projectListOptions(wsId));
   const [isExpanded, setIsExpanded] = useState(false);
 
   const isCreate = props.mode === "create";
@@ -258,6 +261,7 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
   const [executionMode, setExecutionMode] = useState<AutopilotExecutionMode>(
     initial.execution_mode ?? "create_issue",
   );
+  const [projectId, setProjectId] = useState<string>(initial.project_id ?? "");
 
   const initialCfg: TriggerConfig = (() => {
     if (isCreate) {
@@ -309,6 +313,7 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
           description: description.trim() || undefined,
           assignee_id: assigneeId,
           execution_mode: executionMode,
+          project_id: projectId || undefined,
         });
         let scheduleOk = true;
         try {
@@ -331,6 +336,7 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
           description: description.trim() || null,
           assignee_id: assigneeId,
           execution_mode: executionMode,
+          project_id: projectId || null,
         });
         let scheduleOk = true;
         if (scheduleDirty && !schedulePillDisabled) {
@@ -483,6 +489,29 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
               selectedName={selectedAgent?.name}
               selectedDescription={selectedAgent?.description}
             />
+
+            {/* Project */}
+            <div className="space-y-2">
+              <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                Project
+              </label>
+              <Select value={projectId} onValueChange={(v) => setProjectId(v ?? "")}>
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="No project" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="">No project</SelectItem>
+                  {projects.map((p) => (
+                    <SelectItem key={p.id} value={p.id}>
+                      {p.icon ? `${p.icon} ${p.title}` : p.title}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                Issues created by this autopilot will belong to the selected project.
+              </p>
+            </div>
 
             <OutputModeSection mode={executionMode} onChange={setExecutionMode} />
 

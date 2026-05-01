@@ -16,6 +16,7 @@ const CHAT_HEIGHT_KEY = "multica:chat:height";
 const CHAT_EXPANDED_KEY = "multica:chat:expanded";
 /** Focus mode is a personal preference — global across workspaces/sessions. */
 const FOCUS_MODE_KEY = "multica:chat:focusMode";
+const PROJECT_STORAGE_KEY = "multica:chat:selectedProjectId";
 /**
  * Open/closed preference, persisted globally (not per-workspace) — most users
  * have one habitual chat-panel preference across workspaces. Missing key =
@@ -87,6 +88,8 @@ export interface ChatState {
   isOpen: boolean;
   activeSessionId: string | null;
   selectedAgentId: string | null;
+  /** Explicit project context — when set, prepended to every outgoing message. */
+  selectedProjectId: string | null;
   showHistory: boolean;
   /** Drafts per session: sessionId (or DRAFT_NEW_SESSION) → markdown text. */
   inputDrafts: Record<string, string>;
@@ -104,6 +107,7 @@ export interface ChatState {
   toggle: () => void;
   setActiveSession: (id: string | null) => void;
   setSelectedAgentId: (id: string) => void;
+  setSelectedProjectId: (id: string | null) => void;
   setShowHistory: (show: boolean) => void;
   /** sessionId accepts a real session UUID or DRAFT_NEW_SESSION. */
   setInputDraft: (sessionId: string, draft: string) => void;
@@ -136,6 +140,7 @@ export function createChatStore(options: ChatStoreOptions) {
     isOpen: initialIsOpen,
     activeSessionId: storage.getItem(wsKey(SESSION_STORAGE_KEY)),
     selectedAgentId: storage.getItem(wsKey(AGENT_STORAGE_KEY)),
+    selectedProjectId: storage.getItem(wsKey(PROJECT_STORAGE_KEY)),
     showHistory: false,
     inputDrafts: readDrafts(storage, wsKey(DRAFTS_KEY)),
     focusMode: storage.getItem(FOCUS_MODE_KEY) === "true",
@@ -166,6 +171,15 @@ export function createChatStore(options: ChatStoreOptions) {
       logger.info("setSelectedAgentId", { from: get().selectedAgentId, to: id });
       storage.setItem(wsKey(AGENT_STORAGE_KEY), id);
       set({ selectedAgentId: id });
+    },
+    setSelectedProjectId: (id) => {
+      logger.info("setSelectedProjectId", { from: get().selectedProjectId, to: id });
+      if (id) {
+        storage.setItem(wsKey(PROJECT_STORAGE_KEY), id);
+      } else {
+        storage.removeItem(wsKey(PROJECT_STORAGE_KEY));
+      }
+      set({ selectedProjectId: id });
     },
     setShowHistory: (show) => {
       logger.debug("setShowHistory", { to: show });
@@ -218,17 +232,21 @@ export function createChatStore(options: ChatStoreOptions) {
   registerForWorkspaceRehydration(() => {
     const nextSession = storage.getItem(wsKey(SESSION_STORAGE_KEY));
     const nextAgent = storage.getItem(wsKey(AGENT_STORAGE_KEY));
+    const nextProject = storage.getItem(wsKey(PROJECT_STORAGE_KEY));
     const nextDrafts = readDrafts(storage, wsKey(DRAFTS_KEY));
     logger.info("workspace rehydration", {
       prevSession: store.getState().activeSessionId,
       nextSession,
       prevAgent: store.getState().selectedAgentId,
       nextAgent,
+      prevProject: store.getState().selectedProjectId,
+      nextProject,
       draftCount: Object.keys(nextDrafts).length,
     });
     store.setState({
       activeSessionId: nextSession,
       selectedAgentId: nextAgent,
+      selectedProjectId: nextProject,
       inputDrafts: nextDrafts,
     });
   });

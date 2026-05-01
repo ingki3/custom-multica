@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Minus, Maximize2, Minimize2, ChevronDown, Plus, Check } from "lucide-react";
+import { Minus, Maximize2, Minimize2, ChevronDown, FolderKanban, Plus, Check, X } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
 import {
@@ -17,6 +17,7 @@ import {
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useAuthStore } from "@multica/core/auth";
 import { agentListOptions, memberListOptions } from "@multica/core/workspace/queries";
+import { projectListOptions } from "@multica/core/projects/queries";
 import { canAssignAgent } from "@multica/views/issues/components";
 import { api } from "@multica/core/api";
 import { useAgentPresenceDetail } from "@multica/core/agents";
@@ -38,12 +39,14 @@ import {
   ContextAnchorButton,
   ContextAnchorCard,
   buildAnchorMarkdown,
+  buildProjectContextMarkdown,
   useRouteAnchorCandidate,
 } from "./context-anchor";
 import { ChatResizeHandles } from "./chat-resize-handles";
 import { useChatResize } from "./use-chat-resize";
 import { createLogger } from "@multica/core/logger";
-import type { Agent, ChatMessage, ChatPendingTask, ChatSession } from "@multica/core/types";
+import type { Agent, ChatMessage, ChatPendingTask, ChatSession, Project } from "@multica/core/types";
+import { ProjectIcon } from "../../projects/components/project-icon";
 
 const uiLogger = createLogger("chat.ui");
 const apiLogger = createLogger("chat.api");
@@ -57,8 +60,11 @@ export function ChatWindow() {
   const setActiveSession = useChatStore((s) => s.setActiveSession);
   const setSelectedAgentId = useChatStore((s) => s.setSelectedAgentId);
   const user = useAuthStore((s) => s.user);
+  const selectedProjectId = useChatStore((s) => s.selectedProjectId);
+  const setSelectedProjectId = useChatStore((s) => s.setSelectedProjectId);
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const { data: members = [] } = useQuery(memberListOptions(wsId));
+  const { data: projects = [] } = useQuery(projectListOptions(wsId));
   const { data: sessions = [] } = useQuery(chatSessionsOptions(wsId));
   const { data: allSessions = [] } = useQuery(allChatSessionsOptions(wsId));
   const { data: rawMessages, isLoading: messagesLoading } = useQuery(
@@ -155,6 +161,13 @@ export function ChatWindow() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- markRead ref stable
   }, [isOpen, activeSessionId, currentHasUnread]);
 
+  // Resolve the explicitly selected project (if any). Cleared automatically
+  // if the project no longer exists in the workspace.
+  const activeProject = useMemo(
+    () => projects.find((p) => p.id === selectedProjectId) ?? null,
+    [projects, selectedProjectId],
+  );
+
   // Focus-mode anchor: derived from route each render. Prepended to the
   // outgoing message when focus is on; the anchor persists across sends
   // (focus mode tracks the user's page, not a per-message attachment).
@@ -168,9 +181,14 @@ export function ChatWindow() {
       }
 
       const focusOn = useChatStore.getState().focusMode;
-      const finalContent = focusOn && anchorCandidate
-        ? `${buildAnchorMarkdown(anchorCandidate)}\n\n${content}`
-        : content;
+      const projectCtx = activeProject
+        ? buildProjectContextMarkdown(activeProject)
+        : null;
+      const anchorCtx = focusOn && anchorCandidate
+        ? buildAnchorMarkdown(anchorCandidate)
+        : null;
+      const prefix = [projectCtx, anchorCtx].filter(Boolean).join("\n");
+      const finalContent = prefix ? `${prefix}\n\n${content}` : content;
 
       let sessionId = activeSessionId;
       const isNewSession = !sessionId;
@@ -181,6 +199,7 @@ export function ChatWindow() {
         agentId: activeAgent.id,
         contentLength: finalContent.length,
         hasAnchor: focusOn && !!anchorCandidate,
+        projectId: activeProject?.id,
       });
 
       if (!sessionId) {
@@ -241,6 +260,7 @@ export function ChatWindow() {
     [
       activeSessionId,
       activeAgent,
+      activeProject,
       anchorCandidate,
       createSession,
       setActiveSession,
@@ -444,14 +464,40 @@ export function ChatWindow() {
         isRunning={!!pendingTaskId}
         disabled={isSessionArchived}
         agentName={activeAgent?.name}
-        topSlot={<ContextAnchorCard />}
+        topSlot={
+          <>
+            {activeProject && (
+              <div className="mx-2 mt-2 flex items-center gap-1">
+                <span className="inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-xs">
+                  <ProjectIcon project={activeProject} size="md" />
+                  <span className="truncate max-w-40">{activeProject.title}</span>
+                </span>
+                <button
+                  type="button"
+                  className="rounded-sm p-0.5 text-muted-foreground hover:text-foreground hover:bg-accent transition-colors cursor-pointer"
+                  onClick={() => setSelectedProjectId(null)}
+                >
+                  <X className="size-3" />
+                </button>
+              </div>
+            )}
+            <ContextAnchorCard />
+          </>
+        }
         leftAdornment={
-          <AgentDropdown
-            agents={availableAgents}
-            activeAgent={activeAgent}
-            userId={user?.id}
-            onSelect={handleSelectAgent}
-          />
+          <div className="flex items-center gap-0.5">
+            <AgentDropdown
+              agents={availableAgents}
+              activeAgent={activeAgent}
+              userId={user?.id}
+              onSelect={handleSelectAgent}
+            />
+            <ProjectDropdown
+              projects={projects}
+              activeProject={activeProject}
+              onSelect={setSelectedProjectId}
+            />
+          </div>
         }
         rightAdornment={<ContextAnchorButton />}
       />
@@ -692,6 +738,65 @@ function SessionDropdown({
             );
           })
         )}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+/**
+ * Project dropdown: lets the user pin a project context to the chat so every
+ * outgoing message is prefixed with the project info. Selecting "None" clears.
+ */
+function ProjectDropdown({
+  projects,
+  activeProject,
+  onSelect,
+}: {
+  projects: Project[];
+  activeProject: Project | null;
+  onSelect: (id: string | null) => void;
+}) {
+  if (projects.length === 0) return null;
+
+  return (
+    <DropdownMenu>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <DropdownMenuTrigger className="flex items-center gap-1 rounded-md px-1.5 py-1 cursor-pointer outline-none transition-colors hover:bg-accent aria-expanded:bg-accent">
+              {activeProject ? (
+                <ProjectIcon project={activeProject} size="sm" />
+              ) : (
+                <FolderKanban className="size-4 text-muted-foreground" />
+              )}
+            </DropdownMenuTrigger>
+          }
+        />
+        <TooltipContent side="top">
+          {activeProject ? `Project: ${activeProject.title}` : "Select project"}
+        </TooltipContent>
+      </Tooltip>
+      <DropdownMenuContent align="start" side="top" className="max-h-80 w-auto min-w-48 max-w-64">
+        <DropdownMenuItem onClick={() => onSelect(null)}>
+          <FolderKanban className="size-4 text-muted-foreground" />
+          <span className="text-muted-foreground">No project</span>
+          {!activeProject && <Check className="size-3.5 text-muted-foreground shrink-0 ml-auto" />}
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        {projects.map((project) => {
+          const isCurrent = project.id === activeProject?.id;
+          return (
+            <DropdownMenuItem
+              key={project.id}
+              onClick={() => onSelect(project.id)}
+              className="flex min-w-0 items-center gap-2"
+            >
+              <ProjectIcon project={project} size="sm" />
+              <span className="truncate flex-1">{project.title}</span>
+              {isCurrent && <Check className="size-3.5 text-muted-foreground shrink-0" />}
+            </DropdownMenuItem>
+          );
+        })}
       </DropdownMenuContent>
     </DropdownMenu>
   );

@@ -407,3 +407,12 @@ SET status = CASE WHEN EXISTS (
     updated_at = now()
 WHERE a.id = $1
 RETURNING *;
+
+
+-- name: RequeueTask :one
+-- Moves a dispatched/running task back to queued so it can be retried later.
+-- Used when a custom working folder is busy and cannot be isolated.
+UPDATE agent_task_queue
+SET status = 'queued', dispatched_at = NULL
+WHERE id = $1 AND status IN ('dispatched', 'running')
+RETURNING *;
