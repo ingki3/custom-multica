@@ -78,6 +78,8 @@ const desktopAPI = {
    * function. The payload echoes the `slug`, `itemId`, and `issueKey` that
    * were passed to `showNotification`.
    */
+  /** Open a native folder-picker dialog. Returns the selected path, or null if cancelled. */
+  selectFolder: (): Promise<string | null> => ipcRenderer.invoke("dialog:selectFolder"),
   onInboxOpen: (
     callback: (payload: {
       slug: string;

@@ -1130,6 +1130,29 @@ func (h *Handler) ReportTaskProgress(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
+// RequeueTask moves a dispatched/running task back to queued status so it can
+// be retried later. Used by the daemon when a custom working folder is busy
+// and the task cannot be isolated (non-git folder).
+func (h *Handler) RequeueTask(w http.ResponseWriter, r *http.Request) {
+	taskID := chi.URLParam(r, "taskId")
+
+	if _, ok := h.requireDaemonTaskAccess(w, r, taskID); !ok {
+		return
+	}
+
+	task, err := h.Queries.RequeueTask(r.Context(), parseUUID(taskID))
+	if err != nil {
+		slog.Warn("requeue task failed", "task_id", taskID, "error", err)
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	h.TaskService.ReconcileAgentStatus(r.Context(), task.AgentID)
+
+	slog.Info("task requeued", "task_id", taskID, "agent_id", uuidToString(task.AgentID))
+	writeJSON(w, http.StatusOK, map[string]string{"status": "requeued"})
+}
+
 // CompleteTask marks a running task as completed.
 type TaskCompleteRequest struct {
 	PRURL     string `json:"pr_url"`

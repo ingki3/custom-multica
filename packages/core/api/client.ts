@@ -1060,6 +1060,19 @@ export class ApiClient {
     await this.fetch(`/api/projects/${id}`, { method: "DELETE" });
   }
 
+  // Filesystem
+  async listDirectories(path?: string, showHidden?: boolean): Promise<{
+    path: string;
+    parent: string;
+    entries: { name: string; path: string }[];
+  }> {
+    const search = new URLSearchParams();
+    if (path) search.set("path", path);
+    if (showHidden) search.set("showHidden", "true");
+    const qs = search.toString();
+    return this.fetch(`/api/fs/dirs${qs ? `?${qs}` : ""}`);
+  }
+
   // Labels
   async listLabels(): Promise<ListLabelsResponse> {
     return this.fetch(`/api/labels`);

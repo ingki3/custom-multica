@@ -24,6 +24,8 @@ interface DesktopAPI {
   }) => void;
   /** Update the OS dock / taskbar unread badge. Pass 0 to clear. */
   setUnreadBadge: (count: number) => void;
+  /** Open a native folder-picker dialog. Returns the selected path, or null if cancelled. */
+  selectFolder: () => Promise<string | null>;
   /** Listen for "open inbox row" requests from notification clicks. Returns an unsubscribe function. */
   onInboxOpen: (
     callback: (payload: {

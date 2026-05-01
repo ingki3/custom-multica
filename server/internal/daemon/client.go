@@ -167,6 +167,10 @@ func (c *Client) ReportTaskUsage(ctx context.Context, taskID string, usage []Tas
 	}, nil)
 }
 
+func (c *Client) RequeueTask(ctx context.Context, taskID string) error {
+	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/tasks/%s/requeue", taskID), map[string]any{}, nil)
+}
+
 func (c *Client) FailTask(ctx context.Context, taskID, errMsg, sessionID, workDir, failureReason string) error {
 	body := map[string]any{"error": errMsg}
 	if sessionID != "" {

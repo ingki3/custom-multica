@@ -83,6 +83,7 @@ func init() {
 	projectCreateCmd.Flags().String("status", "", "Project status")
 	projectCreateCmd.Flags().String("icon", "", "Project icon (emoji)")
 	projectCreateCmd.Flags().String("lead", "", "Lead name (member or agent)")
+	projectCreateCmd.Flags().String("working-folder", "", "Local working folder path for agents")
 	projectCreateCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// project update
@@ -91,6 +92,7 @@ func init() {
 	projectUpdateCmd.Flags().String("status", "", "New status")
 	projectUpdateCmd.Flags().String("icon", "", "New icon (emoji)")
 	projectUpdateCmd.Flags().String("lead", "", "New lead name (member or agent)")
+	projectUpdateCmd.Flags().String("working-folder", "", "Local working folder path (use empty string to clear)")
 	projectUpdateCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// project delete
@@ -226,6 +228,9 @@ func runProjectCreate(cmd *cobra.Command, _ []string) error {
 		body["lead_type"] = aType
 		body["lead_id"] = aID
 	}
+	if v, _ := cmd.Flags().GetString("working-folder"); v != "" {
+		body["working_folder"] = v
+	}
 
 	var result map[string]any
 	if err := client.PostJSON(ctx, "/api/projects", body, &result); err != nil {
@@ -282,9 +287,17 @@ func runProjectUpdate(cmd *cobra.Command, args []string) error {
 		body["lead_type"] = aType
 		body["lead_id"] = aID
 	}
+	if cmd.Flags().Changed("working-folder") {
+		v, _ := cmd.Flags().GetString("working-folder")
+		if v == "" {
+			body["working_folder"] = nil
+		} else {
+			body["working_folder"] = v
+		}
+	}
 
 	if len(body) == 0 {
-		return fmt.Errorf("no fields to update; use flags like --title, --status, --description, --icon, --lead")
+		return fmt.Errorf("no fields to update; use flags like --title, --status, --description, --icon, --lead, --working-folder")
 	}
 
 	var result map[string]any

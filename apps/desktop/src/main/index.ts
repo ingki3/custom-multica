@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, nativeImage, Notification } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, nativeImage, Notification } from "electron";
 import { homedir } from "os";
 import { join } from "path";
 import { electronApp, optimizer, is } from "@electron-toolkit/utils";
@@ -271,6 +271,18 @@ if (!gotTheLock) {
       } else {
         app.setBadgeCount(count);
       }
+    });
+
+    // IPC: open a native folder-picker dialog and return the selected path.
+    // Used by the renderer to let users browse for a project working folder
+    // instead of typing the path manually.
+    ipcMain.handle("dialog:selectFolder", async () => {
+      if (!mainWindow) return null;
+      const result = await dialog.showOpenDialog(mainWindow, {
+        properties: ["openDirectory"],
+      });
+      if (result.canceled || result.filePaths.length === 0) return null;
+      return result.filePaths[0];
     });
 
     createWindow();
