@@ -291,8 +291,8 @@ func ReuseCustomFolderIsolated(folderPath, provider, codexVersion, taskID, agent
 	return env
 }
 
-// CleanupIsolatedWorktree removes a worktree directory created by
-// ReuseCustomFolderIsolated. The git branch is kept for user review / PR.
+// CleanupIsolatedWorktree commits any uncommitted changes in the worktree,
+// then removes the worktree directory. The git branch is kept for user review / PR.
 func CleanupIsolatedWorktree(worktreePath string, logger *slog.Logger) {
 	// Find the git root of the base repo (parent of .multica_worktrees/).
 	// worktreePath looks like: {folderPath}/.multica_worktrees/{shortID}/
@@ -306,6 +306,24 @@ func CleanupIsolatedWorktree(worktreePath string, logger *slog.Logger) {
 		logger.Warn("execenv: base folder is not a git repo, removing worktree directory directly", "path", worktreePath)
 		os.RemoveAll(worktreePath)
 		return
+	}
+
+	// Auto-commit any uncommitted changes so they survive worktree removal.
+	// Without this, `git worktree remove --force` discards all work.
+	statusCmd := exec.Command("git", "-C", worktreePath, "status", "--porcelain")
+	if out, err := statusCmd.Output(); err == nil && len(strings.TrimSpace(string(out))) > 0 {
+		logger.Info("execenv: auto-committing uncommitted changes in worktree", "path", worktreePath)
+		addCmd := exec.Command("git", "-C", worktreePath, "add", "-A")
+		if addOut, err := addCmd.CombinedOutput(); err != nil {
+			logger.Warn("execenv: git add failed in worktree", "output", strings.TrimSpace(string(addOut)), "error", err)
+		} else {
+			commitCmd := exec.Command("git", "-C", worktreePath, "commit", "-m", "chore: auto-commit agent work before worktree cleanup")
+			if commitOut, err := commitCmd.CombinedOutput(); err != nil {
+				logger.Warn("execenv: git commit failed in worktree", "output", strings.TrimSpace(string(commitOut)), "error", err)
+			} else {
+				logger.Info("execenv: auto-committed changes in worktree")
+			}
+		}
 	}
 
 	// Remove the worktree but keep the branch.

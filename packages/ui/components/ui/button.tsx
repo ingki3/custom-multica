@@ -48,10 +48,20 @@ function Button({
   size = "default",
   ...props
 }: ButtonPrimitive.Props & VariantProps<typeof buttonVariants>) {
+  // When a custom `render` element is provided that is not a native <button>,
+  // set nativeButton=false so Base UI doesn't warn about the mismatch.
+  const render = props.render as React.ReactElement | undefined;
+  const isNonButtonRender =
+    render != null &&
+    typeof render.type === "string"
+      ? render.type !== "button"
+      : render != null;
+
   return (
     <ButtonPrimitive
       data-slot="button"
       className={cn(buttonVariants({ variant, size, className }))}
+      {...(isNonButtonRender ? { nativeButton: false } : {})}
       {...props}
     />
   )

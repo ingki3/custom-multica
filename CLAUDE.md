@@ -7,6 +7,23 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Before starting any task**, read `TODO.md` to understand the current backlog and completed work. If the task you are about to do is not listed in the backlog, add it before starting.
 - **After completing a task**, update `TODO.md`: move the item from Backlog to Completed (check the checkbox), and add a summary of what was done in the detail.
 
+## Server Restart
+
+서버를 재시작할 때는 **백엔드 + 프론트엔드 + 데몬** 세 가지를 모두 확인하고 띄워야 한다.
+
+```bash
+# 백엔드 재시작 (데몬은 자동 시작됨)
+kill $(lsof -t -i :8080) 2>/dev/null; sleep 1; make server &disown
+
+# 프론트엔드 재시작
+kill $(lsof -t -i :3000) 2>/dev/null; sleep 1; pnpm dev:web &disown
+
+# 또는 한 번에 전부 시작
+make dev
+```
+
+`make server`는 백엔드 시작 후 데몬이 꺼져 있으면 자동으로 함께 띄운다. **프론트엔드(`pnpm dev:web`)는 별도로 시작해야 한다.**
+
 ## Project Context
 
 Multica is an AI-native task management platform — like Linear, but with AI agents as first-class citizens.
