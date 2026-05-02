@@ -533,10 +533,11 @@ func (s *TaskService) StartTask(ctx context.Context, taskID pgtype.UUID) (*db.Ag
 	}
 
 	// Auto-transition: issue → in_progress when task starts running.
-	// Only from todo/backlog — don't override if agent/user already moved it.
+	// Only from todo — backlog is a parking lot where comment-triggered
+	// tasks (discussions) should not move the issue to in_progress.
 	if task.IssueID.Valid {
 		if issue, err := s.Queries.GetIssue(ctx, task.IssueID); err == nil {
-			if issue.Status == "todo" || issue.Status == "backlog" {
+			if issue.Status == "todo" {
 				if updated, err := s.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
 					ID:     task.IssueID,
 					Status: "in_progress",

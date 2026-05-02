@@ -6,6 +6,7 @@ import {
   BookOpenText,
   FileText,
   KeyRound,
+  Plug,
   Terminal,
 } from "lucide-react";
 import type { Agent, AgentRuntime } from "@multica/core/types";
@@ -24,13 +25,15 @@ import { InstructionsTab } from "./tabs/instructions-tab";
 import { SkillsTab } from "./tabs/skills-tab";
 import { EnvTab } from "./tabs/env-tab";
 import { CustomArgsTab } from "./tabs/custom-args-tab";
+import { McpConfigTab } from "./tabs/mcp-config-tab";
 
 type DetailTab =
   | "activity"
   | "instructions"
   | "skills"
   | "env"
-  | "custom_args";
+  | "custom_args"
+  | "mcp_config";
 
 const detailTabs: {
   id: DetailTab;
@@ -42,6 +45,7 @@ const detailTabs: {
   { id: "skills", label: "Skills", icon: BookOpenText },
   { id: "env", label: "Environment", icon: KeyRound },
   { id: "custom_args", label: "Custom Args", icon: Terminal },
+  { id: "mcp_config", label: "MCP", icon: Plug },
 ];
 
 interface AgentOverviewPaneProps {
@@ -158,6 +162,16 @@ export function AgentOverviewPane({
             <CustomArgsTab
               agent={agent}
               runtimeDevice={runtime ?? undefined}
+              onSave={(updates) => onUpdate(agent.id, updates)}
+              onDirtyChange={setActiveDirty}
+            />
+          </TabContent>
+        )}
+        {activeTab === "mcp_config" && (
+          <TabContent>
+            <McpConfigTab
+              agent={agent}
+              readOnly={agent.mcp_config_redacted}
               onSave={(updates) => onUpdate(agent.id, updates)}
               onDirtyChange={setActiveDirty}
             />
