@@ -18,7 +18,8 @@
 
 ```
 태스크 시작 (StartTask)
-  현재 상태가 todo 또는 backlog → in_progress
+  현재 상태가 todo → in_progress
+  backlog은 변경하지 않음 (파킹랏 — 코멘트 논의로 상태가 바뀌지 않아야 함)
 
 태스크 성공 완료 (CompleteTask)  
   현재 상태가 in_progress → in_review
@@ -31,7 +32,7 @@
 
 | 현재 상태 | 이벤트 | 자동 전환 | 비고 |
 |-----------|--------|-----------|------|
-| `backlog` | 태스크 시작 | -> `in_progress` | |
+| `backlog` | 태스크 시작 | 변경 없음 | 파킹랏 — 코멘트 논의로 상태가 바뀌지 않음 |
 | `todo` | 태스크 시작 | -> `in_progress` | |
 | `in_progress` | 태스크 성공 완료 | -> `in_review` | |
 | `in_progress` | 태스크 실패 (재시도 없음, 활성 태스크 없음) | -> `todo` | 기존 로직 |
