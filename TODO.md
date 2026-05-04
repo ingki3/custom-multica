@@ -14,12 +14,21 @@
 - [x] **Working Folder 동시 접근 정책** — 같은 프로젝트에 여러 에이전트가 동시에 할당되면 같은 폴더에서 작업하게 됨. 하이브리드 정책 구현: git 레포인 경우 `.multica_worktrees/{taskID}/`에 per-task worktree 자동 생성으로 격리, non-git 폴더인 경우 태스크를 큐로 되돌려 직렬화. 데몬 내 `workingFolderTasks map[string]int`로 폴더별 활성 태스크 수 추적. `RequeueTask` API 엔드포인트 추가. 단일 태스크 시 기존 동작 변경 없음.
 - [ ] **Working Folder에 생성되는 .agent_context/ 정리** — 에이전트 작업 후 `.agent_context/` 폴더가 사용자 프로젝트에 남음. 자동 정리 정책 또는 `.gitignore` 자동 추가 검토.
 - [ ] **CLI 기반 로그인 (브라우저 없이)** — 터미널에서 이메일 + 인증코드를 직접 입력하여 토큰 발급. 헤드리스 환경 지원.
-- [ ] **이슈 간 의존성 기반 실행 순서 제어** — 이슈 간 의존 관계(blocks/blocked_by/related)를 설정하고, 의존성이 충족된 이슈만 에이전트에게 디스패치되도록 태스크 큐를 개선.
+- [ ] **이슈 간 의존성 기반 실행 순서 제어** — 이슈에 선행 조건(prerequisites)과 후속 이슈(next issues)를 설정하여, 선행 이슈가 모두 Done이 되면 후속 이슈가 자동으로 In Progress로 전환되어 순서대로 개발이 진행되도록 한다.
+  - **핵심 개념**:
+    1. **선행 이슈 (Prerequisites)**: 해당 이슈를 실행하기 위해 먼저 Done 상태가 되어야 하는 이슈 목록. 선행 이슈가 모두 Done이 아니면 에이전트에게 태스크가 디스패치되지 않음.
+    2. **후속 이슈 (Next Issues)**: 해당 이슈가 Done이 되었을 때 자동으로 Todo → In Progress로 이동시킬 이슈 목록. 후속 이슈의 선행 조건이 모두 충족되면 즉시 실행 시작.
+  - **동작 흐름**: `A(Done) → B(자동 In Progress) → B(Done) → C(자동 In Progress) → ...` 식으로 이슈 체인이 순서대로 자동 실행됨.
   - **현재 상태**: `issue_dependency` 테이블이 초기 마이그레이션(001_init.up.sql)에 스키마만 존재하고, 쿼리/API/UI가 전혀 구현되지 않은 데드 코드 상태. 태스크 디스패치는 우선순위 큐(priority DESC, created_at ASC) 기반이며 의존성 검사 없음.
   - **구현 범위**:
-    1. **API/쿼리 계층**: `issue_dependency` 테이블에 대한 CRUD 쿼리(sqlc) 및 REST 엔드포인트 (`POST/DELETE /api/issues/{id}/dependencies`) 추가.
-    2. **UI**: 이슈 상세 사이드바에 의존성 관리 섹션 추가 — blocks/blocked_by/related 관계 추가/삭제, 의존 이슈 칩 표시.
-    3. **태스크 디스패치 연동**: `ClaimAgentTask` SQL 쿼리에 의존성 검사 조건 추가 — `blocked_by` 타입의 의존 이슈가 모두 완료(done/cancelled) 상태인 경우에만 태스크 claim 가능. 미충족 시 해당 태스크를 스킵하고 다음 태스크를 claim.
-    4. **이슈 완료 시 연쇄 실행**: 이슈가 완료되면 해당 이슈에 `blocked_by`로 의존하던 이슈들의 대기 중 태스크를 자동으로 활성화(재큐잉 또는 알림).
+    1. **API/쿼리 계층**: `issue_dependency` 테이블에 대한 CRUD 쿼리(sqlc) 및 REST 엔드포인트 (`POST/DELETE /api/issues/{id}/dependencies`) 추가. 관계 타입은 `prerequisite`(선행)와 `next`(후속) 두 가지.
+    2. **UI**: 이슈 상세 사이드바에 의존성 관리 섹션 추가 — "선행 이슈"와 "후속 이슈" 목록 표시, 이슈 검색/선택으로 추가/삭제.
+    3. **태스크 디스패치 연동**: `ClaimAgentTask` SQL 쿼리에 선행 이슈 검사 조건 추가 — `prerequisite` 타입의 의존 이슈가 모두 `done` 상태인 경우에만 태스크 claim 가능. 미충족 시 해당 태스크를 스킵하고 다음 태스크를 claim.
+    4. **이슈 완료 시 후속 이슈 자동 실행**: 이슈가 Done이 되면 해당 이슈를 `prerequisite`로 가진 후속 이슈들을 확인하고, 모든 선행 조건이 충족된 후속 이슈를 자동으로 `in_progress`로 전환 + 에이전트 태스크 생성.
     5. **순환 의존성 방지**: 의존성 추가 시 순환 참조(A→B→C→A) 검증 로직 필요.
-  - **기존 스키마**: `issue_dependency(id UUID, issue_id UUID FK, depends_on_issue_id UUID FK, type TEXT['blocks','blocked_by','related'])` — 그대로 활용 가능.
+  - **양방향 자동 설정**: 한쪽만 설정하면 반대쪽은 자동으로 설정된다.
+    - B를 A의 후속 이슈로 지정 → A는 자동으로 B의 선행 이슈가 됨
+    - A를 B의 선행 이슈로 지정 → B는 자동으로 A의 후속 이슈가 됨
+    - DB에는 단일 레코드(`depends_on_issue_id=A, issue_id=B`)만 저장하고, 조회 시 방향에 따라 해석
+  - **설정 시 검증**: 의존성 추가 후 즉시 순환(루프) 검사를 수행. A→B→C→A 같은 순환이 감지되면 추가를 거부하고 에러 반환. 검증 통과 후에만 확정.
+  - **기존 스키마**: `issue_dependency(id UUID, issue_id UUID FK, depends_on_issue_id UUID FK, type TEXT)` — 단일 레코드로 양방향 관계 표현. `depends_on_issue_id`가 선행, `issue_id`가 후속.
