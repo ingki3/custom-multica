@@ -15,14 +15,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 # 백엔드 재시작 (데몬은 자동 시작됨)
 kill $(lsof -t -i :8080) 2>/dev/null; sleep 1; make server &disown
 
-# 프론트엔드 재시작
-kill $(lsof -t -i :3000) 2>/dev/null; sleep 1; pnpm dev:web &disown
+# 프론트엔드 재시작 (Next.js 직접 실행 — turbo 경유 시 약 2시간 후 자동 종료됨)
+kill $(lsof -t -i :3000) 2>/dev/null; sleep 1; cd apps/web && nohup npx next dev --port ${FRONTEND_PORT:-3000} > /tmp/multica-frontend.log 2>&1 & cd -
 
 # 또는 한 번에 전부 시작
 make dev
 ```
 
-`make server`는 백엔드 시작 후 데몬이 꺼져 있으면 자동으로 함께 띄운다. **프론트엔드(`pnpm dev:web`)는 별도로 시작해야 한다.**
+`make server`는 백엔드 시작 후 데몬이 꺼져 있으면 자동으로 함께 띄운다. **프론트엔드(`pnpm dev:web`)는 별도로 시작해야 한다.** 반드시 `nohup`으로 시작할 것 — `&disown`만으로는 셸 세션 종료 시 프로세스가 함께 죽는다. 프론트엔드 로그는 `/tmp/multica-frontend.log`에서 확인 가능.
 
 ## Project Context
 
