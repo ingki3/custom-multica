@@ -1514,6 +1514,12 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		h.TaskService.CancelTasksForIssue(r.Context(), issue.ID)
 	}
 
+	// When an issue reaches done, activate any next issues whose
+	// prerequisites are all met.
+	if statusChanged && issue.Status == "done" {
+		h.TaskService.ActivateNextIssues(r.Context(), issue.ID)
+	}
+
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -1937,4 +1943,201 @@ func (h *Handler) BatchDeleteIssues(w http.ResponseWriter, r *http.Request) {
 
 	slog.Info("batch delete issues", append(logger.RequestAttrs(r), "count", deleted)...)
 	writeJSON(w, http.StatusOK, map[string]any{"deleted": deleted})
+}
+
+// ---------------------------------------------------------------------------
+// Issue Dependencies
+// ---------------------------------------------------------------------------
+
+func (h *Handler) ListIssueDependencies(w http.ResponseWriter, r *http.Request) {
+	issueID := chi.URLParam(r, "issueId")
+	issueUUID, ok := parseUUIDOrBadRequest(w, issueID, "issue id")
+	if !ok {
+		return
+	}
+
+	prereqs, err := h.Queries.ListPrerequisites(r.Context(), issueUUID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list prerequisites")
+		return
+	}
+	nextIssues, err := h.Queries.ListNextIssues(r.Context(), issueUUID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list next issues")
+		return
+	}
+
+	// Get workspace prefix for identifiers
+	workspaceID := ctxWorkspaceID(r.Context())
+	wsUUID, _ := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
+	prefix := h.getIssuePrefix(r.Context(), wsUUID)
+
+	type depResponse struct {
+		ID         string `json:"id"`
+		IssueID    string `json:"issue_id"`
+		DependsOn  string `json:"depends_on_issue_id"`
+		Title      string `json:"title"`
+		Status     string `json:"status"`
+		Identifier string `json:"identifier"`
+	}
+
+	prerequisites := make([]depResponse, 0, len(prereqs))
+	for _, p := range prereqs {
+		prerequisites = append(prerequisites, depResponse{
+			ID:         uuidToString(p.ID),
+			IssueID:    uuidToString(p.IssueID),
+			DependsOn:  uuidToString(p.DependsOnIssueID),
+			Title:      p.DependsOnTitle,
+			Status:     p.DependsOnStatus,
+			Identifier: fmt.Sprintf("%s-%d", prefix, p.DependsOnNumber),
+		})
+	}
+
+	next := make([]depResponse, 0, len(nextIssues))
+	for _, n := range nextIssues {
+		next = append(next, depResponse{
+			ID:         uuidToString(n.ID),
+			IssueID:    uuidToString(n.IssueID),
+			DependsOn:  uuidToString(n.DependsOnIssueID),
+			Title:      n.NextTitle,
+			Status:     n.NextStatus,
+			Identifier: fmt.Sprintf("%s-%d", prefix, n.NextNumber),
+		})
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"prerequisites": prerequisites,
+		"next_issues":   next,
+	})
+}
+
+func (h *Handler) CreateIssueDependency(w http.ResponseWriter, r *http.Request) {
+	issueID := chi.URLParam(r, "issueId")
+	issueUUID, ok := parseUUIDOrBadRequest(w, issueID, "issue id")
+	if !ok {
+		return
+	}
+
+	var req struct {
+		TargetIssueID string `json:"target_issue_id"`
+		Direction     string `json:"direction"` // "prerequisite" or "next"
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	targetUUID, ok := parseUUIDOrBadRequest(w, req.TargetIssueID, "target_issue_id")
+	if !ok {
+		return
+	}
+
+	if req.Direction != "prerequisite" && req.Direction != "next" {
+		writeError(w, http.StatusBadRequest, "direction must be 'prerequisite' or 'next'")
+		return
+	}
+
+	// Determine which is issue_id (next) and depends_on_issue_id (prerequisite)
+	var nextID, prereqID pgtype.UUID
+	if req.Direction == "prerequisite" {
+		// "target is a prerequisite of this issue" → this issue depends on target
+		nextID = issueUUID
+		prereqID = targetUUID
+	} else {
+		// "target is a next issue of this issue" → target depends on this issue
+		nextID = targetUUID
+		prereqID = issueUUID
+	}
+
+	// Cycle detection: check if adding this dependency would create a loop.
+	// We check if prereqID can already reach nextID through existing deps.
+	hasCycle, err := h.detectDependencyCycle(r.Context(), nextID, prereqID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "cycle detection failed")
+		return
+	}
+	if hasCycle {
+		writeError(w, http.StatusBadRequest, "adding this dependency would create a circular reference")
+		return
+	}
+
+	dep, err := h.Queries.CreateIssueDependency(r.Context(), db.CreateIssueDependencyParams{
+		IssueID:          nextID,
+		DependsOnIssueID: prereqID,
+	})
+	if err != nil {
+		if strings.Contains(err.Error(), "duplicate") || strings.Contains(err.Error(), "unique") {
+			writeError(w, http.StatusConflict, "dependency already exists")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to create dependency")
+		return
+	}
+
+	workspaceID := ctxWorkspaceID(r.Context())
+	userID, _ := requireUserID(w, r)
+	h.publish(protocol.EventIssueUpdated, workspaceID, "member", userID, map[string]any{
+		"dependency_created": true,
+		"dependency":         dep,
+	})
+
+	writeJSON(w, http.StatusCreated, dep)
+}
+
+func (h *Handler) DeleteIssueDependency(w http.ResponseWriter, r *http.Request) {
+	depID := chi.URLParam(r, "dependencyId")
+	depUUID, ok := parseUUIDOrBadRequest(w, depID, "dependency id")
+	if !ok {
+		return
+	}
+
+	if err := h.Queries.DeleteIssueDependency(r.Context(), depUUID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete dependency")
+		return
+	}
+
+	workspaceID := ctxWorkspaceID(r.Context())
+	userID, _ := requireUserID(w, r)
+	h.publish(protocol.EventIssueUpdated, workspaceID, "member", userID, map[string]any{
+		"dependency_deleted": true,
+		"dependency_id":      depID,
+	})
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// detectDependencyCycle checks if adding nextID depends on prereqID would
+// create a circular dependency. Uses iterative BFS in Go because sqlc doesn't
+// support WITH RECURSIVE inside subqueries.
+func (h *Handler) detectDependencyCycle(ctx context.Context, nextID, prereqID pgtype.UUID) (bool, error) {
+	// Self-dependency
+	if nextID == prereqID {
+		return true, nil
+	}
+
+	// BFS: starting from prereqID, follow depends_on links upward.
+	// If we reach nextID, there's a cycle.
+	visited := map[pgtype.UUID]bool{prereqID: true}
+	queue := []pgtype.UUID{prereqID}
+
+	for len(queue) > 0 {
+		current := queue[0]
+		queue = queue[1:]
+
+		prereqs, err := h.Queries.ListPrerequisites(ctx, current)
+		if err != nil {
+			return false, err
+		}
+		for _, p := range prereqs {
+			if p.DependsOnIssueID == nextID {
+				return true, nil
+			}
+			if !visited[p.DependsOnIssueID] {
+				visited[p.DependsOnIssueID] = true
+				queue = append(queue, p.DependsOnIssueID)
+			}
+		}
+	}
+
+	return false, nil
 }

@@ -14,7 +14,7 @@
 - [x] **Working Folder 동시 접근 정책** — 같은 프로젝트에 여러 에이전트가 동시에 할당되면 같은 폴더에서 작업하게 됨. 하이브리드 정책 구현: git 레포인 경우 `.multica_worktrees/{taskID}/`에 per-task worktree 자동 생성으로 격리, non-git 폴더인 경우 태스크를 큐로 되돌려 직렬화. 데몬 내 `workingFolderTasks map[string]int`로 폴더별 활성 태스크 수 추적. `RequeueTask` API 엔드포인트 추가. 단일 태스크 시 기존 동작 변경 없음.
 - [ ] **Working Folder에 생성되는 .agent_context/ 정리** — 에이전트 작업 후 `.agent_context/` 폴더가 사용자 프로젝트에 남음. 자동 정리 정책 또는 `.gitignore` 자동 추가 검토.
 - [ ] **CLI 기반 로그인 (브라우저 없이)** — 터미널에서 이메일 + 인증코드를 직접 입력하여 토큰 발급. 헤드리스 환경 지원.
-- [ ] **이슈 간 의존성 기반 실행 순서 제어** — 이슈에 선행 조건(prerequisites)과 후속 이슈(next issues)를 설정하여, 선행 이슈가 모두 Done이 되면 후속 이슈가 자동으로 In Progress로 전환되어 순서대로 개발이 진행되도록 한다.
+- [x] **이슈 간 의존성 기반 실행 순서 제어** — 이슈에 선행 조건(prerequisites)과 후속 이슈(next issues)를 설정하여, 선행 이슈가 모두 Done이 되면 후속 이슈가 자동으로 In Progress로 전환되어 순서대로 개발이 진행되도록 한다. Migration 066으로 type 제약 변경 + 인덱스 + unique 추가. `issue_dependency.sql`에 CRUD + 순환검사 쿼리. `ClaimAgentTask`에 선행이슈 검사 추가. `ActivateNextIssues`로 Done 시 후속 이슈 자동 활성화. REST API (`GET/POST/DELETE /api/issues/{id}/dependencies`) + 프론트엔드 타입 + API 클라이언트 구현.
   - **핵심 개념**:
     1. **선행 이슈 (Prerequisites)**: 해당 이슈를 실행하기 위해 먼저 Done 상태가 되어야 하는 이슈 목록. 선행 이슈가 모두 Done이 아니면 에이전트에게 태스크가 디스패치되지 않음.
     2. **후속 이슈 (Next Issues)**: 해당 이슈가 Done이 되었을 때 자동으로 Todo → In Progress로 이동시킬 이슈 목록. 후속 이슈의 선행 조건이 모두 충족되면 즉시 실행 시작.

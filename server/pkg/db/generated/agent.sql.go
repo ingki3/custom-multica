@@ -345,6 +345,15 @@ WHERE id = (
               )
             )
       )
+      -- Skip tasks whose issue has unmet prerequisites (dependency ordering).
+      -- Issues with all prerequisites done (or no prerequisites) pass through.
+      -- Non-issue tasks (chat, autopilot, quick-create) have NULL issue_id and pass.
+      AND NOT EXISTS (
+          SELECT 1 FROM issue_dependency dep
+          JOIN issue prereq ON prereq.id = dep.depends_on_issue_id
+          WHERE dep.issue_id = atq.issue_id
+            AND prereq.status != 'done'
+      )
     ORDER BY atq.priority DESC, atq.created_at ASC
     LIMIT 1
     FOR UPDATE SKIP LOCKED
