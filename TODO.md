@@ -14,6 +14,14 @@
 - [x] **Working Folder 동시 접근 정책** — 같은 프로젝트에 여러 에이전트가 동시에 할당되면 같은 폴더에서 작업하게 됨. 하이브리드 정책 구현: git 레포인 경우 `.multica_worktrees/{taskID}/`에 per-task worktree 자동 생성으로 격리, non-git 폴더인 경우 태스크를 큐로 되돌려 직렬화. 데몬 내 `workingFolderTasks map[string]int`로 폴더별 활성 태스크 수 추적. `RequeueTask` API 엔드포인트 추가. 단일 태스크 시 기존 동작 변경 없음.
 - [ ] **Working Folder에 생성되는 .agent_context/ 정리** — 에이전트 작업 후 `.agent_context/` 폴더가 사용자 프로젝트에 남음. 자동 정리 정책 또는 `.gitignore` 자동 추가 검토.
 - [ ] **CLI 기반 로그인 (브라우저 없이)** — 터미널에서 이메일 + 인증코드를 직접 입력하여 토큰 발급. 헤드리스 환경 지원.
+- [x] **워크스페이스 MCP 서버 공유 관리** — 현재 MCP 서버는 각 에이전트마다 개별 설정(`agent.mcp_config`)하는 구조. Migration 067로 `workspace_mcp_server` + `agent_mcp_server` 테이블 추가. REST API (CRUD + 에이전트 연결), ClaimTask에서 공유 + 개별 MCP 설정 자동 병합, 프론트엔드 타입 + API 클라이언트 구현. Skill은 "워크스페이스에 공통 등록 → 에이전트에서 선택" 패턴인데 MCP는 이 패턴이 없어서, 같은 MCP 서버를 여러 에이전트에 설정하려면 동일 JSON을 반복 입력해야 함.
+  - **개선 방향**: Skill과 동일한 2-tier 모델 도입
+    1. **워크스페이스 레벨 MCP 서버 레지스트리**: `workspace_mcp_server` 테이블에 공통 MCP 서버를 등록 (name, transport, command/url, args, env)
+    2. **에이전트별 선택**: `agent_mcp_server` 조인 테이블로 에이전트가 사용할 MCP 서버를 선택/해제. 에이전트별 env 오버라이드 지원 (API 키 등 에이전트마다 다를 수 있는 값).
+    3. **UI**: Settings 페이지에 "MCP Servers" 관리 섹션 추가 (CRUD). 에이전트 상세 MCP 탭에서 워크스페이스 등록 서버 선택 체크박스 + 개별 설정 병행 가능.
+    4. **데몬 연동**: 태스크 claim 시 에이전트의 개별 `mcp_config` + 워크스페이스 공유 MCP 서버를 병합하여 전달.
+  - **하위 호환**: 기존 에이전트별 `mcp_config` 필드는 유지 — 개별 설정과 공유 설정이 병합됨.
+- [ ] **Admin 2.0 제작 계획 수립** (BIZ-108) — admin.pen 디자인 파일 점검 → Design Agent가 부족한 부분 보완 → Dev Agent가 서브 이슈 분해 → `--requires`/`--then-runs`로 순서 설정하여 순차 개발 진행. 3단계 워크플로: 1) Design Agent 디자인 점검/보완 2) Dev Agent 서브이슈 분해 3) 서브이슈 순차 실행.
 - [x] **이슈 간 의존성 기반 실행 순서 제어** — 이슈에 선행 조건(prerequisites)과 후속 이슈(next issues)를 설정하여, 선행 이슈가 모두 Done이 되면 후속 이슈가 자동으로 In Progress로 전환되어 순서대로 개발이 진행되도록 한다. Migration 066으로 type 제약 변경 + 인덱스 + unique 추가. `issue_dependency.sql`에 CRUD + 순환검사 쿼리. `ClaimAgentTask`에 선행이슈 검사 추가. `ActivateNextIssues`로 Done 시 후속 이슈 자동 활성화. REST API (`GET/POST/DELETE /api/issues/{id}/dependencies`) + 프론트엔드 타입 + API 클라이언트 구현.
   - **핵심 개념**:
     1. **선행 이슈 (Prerequisites)**: 해당 이슈를 실행하기 위해 먼저 Done 상태가 되어야 하는 이슈 목록. 선행 이슈가 모두 Done이 아니면 에이전트에게 태스크가 디스패치되지 않음.

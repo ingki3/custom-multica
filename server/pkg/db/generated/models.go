@@ -43,6 +43,13 @@ type Agent struct {
 	Model              pgtype.Text        `json:"model"`
 }
 
+type AgentMcpServer struct {
+	AgentID     pgtype.UUID        `json:"agent_id"`
+	McpServerID pgtype.UUID        `json:"mcp_server_id"`
+	EnvOverride []byte             `json:"env_override"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
 type AgentRuntime struct {
 	ID             pgtype.UUID        `json:"id"`
 	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
@@ -453,4 +460,18 @@ type WorkspaceInvitation struct {
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
 	ExpiresAt     pgtype.Timestamptz `json:"expires_at"`
+}
+
+type WorkspaceMcpServer struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Name        string             `json:"name"`
+	Transport   string             `json:"transport"`
+	Command     pgtype.Text        `json:"command"`
+	Args        []byte             `json:"args"`
+	Url         pgtype.Text        `json:"url"`
+	Env         []byte             `json:"env"`
+	CreatedBy   pgtype.UUID        `json:"created_by"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 }

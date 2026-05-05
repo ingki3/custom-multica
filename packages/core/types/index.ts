@@ -66,3 +66,4 @@ export type {
   GetAutopilotResponse,
   ListAutopilotRunsResponse,
 } from "./autopilot";
+export type { McpServer, CreateMcpServerRequest, UpdateMcpServerRequest, AgentMcpServerEntry } from "./mcp";
