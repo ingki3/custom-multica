@@ -44,3 +44,18 @@ export interface Issue {
   created_at: string;
   updated_at: string;
 }
+
+export interface IssueDependency {
+  id: string;
+  issue_id: string;
+  depends_on_issue_id: string;
+  type: string;
+  title?: string;
+  status?: IssueStatus;
+  identifier?: string;
+}
+
+export interface IssueDependenciesResponse {
+  prerequisites: IssueDependency[];
+  next_issues: IssueDependency[];
+}

@@ -178,6 +178,9 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
   const [propertiesOpen, setPropertiesOpen] = useState(true);
   const [detailsOpen, setDetailsOpen] = useState(true);
   const [parentIssueOpen, setParentIssueOpen] = useState(true);
+  const [dependenciesOpen, setDependenciesOpen] = useState(true);
+  const [depPickerOpen, setDepPickerOpen] = useState<"prerequisite" | "next" | null>(null);
+  const [depFilter, setDepFilter] = useState("");
   const [tokenUsageOpen, setTokenUsageOpen] = useState(true);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
@@ -255,6 +258,14 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
     ...childIssuesOptions(wsId, id),
     enabled: !!issue,
   });
+  // Issue dependencies (prerequisites + next issues)
+  const { data: dependencies, refetch: refetchDeps } = useQuery({
+    queryKey: ["issues", wsId, "dependencies", id],
+    queryFn: () => api.listIssueDependencies(id),
+    enabled: !!issue,
+  });
+  const prerequisites = dependencies?.prerequisites ?? [];
+  const nextIssues = dependencies?.next_issues ?? [];
   // Parent's children — used to render the "x/y" progress next to the
   // "Sub-issue of …" breadcrumb under the title.
   const { data: parentChildIssues = [] } = useQuery({
@@ -414,6 +425,151 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
               <span className="truncate group-hover:text-foreground">{parentIssue.title}</span>
             </AppLink>
           </div>}
+        </div>
+      )}
+
+      {/* Dependencies */}
+      {(prerequisites.length > 0 || nextIssues.length > 0 || true) && (
+        <div>
+          <button
+            className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${dependenciesOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
+            onClick={() => setDependenciesOpen(!dependenciesOpen)}
+          >
+            Dependencies
+            {(prerequisites.length > 0 || nextIssues.length > 0) && (
+              <span className="text-muted-foreground font-normal ml-1">
+                {prerequisites.length + nextIssues.length}
+              </span>
+            )}
+            <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${dependenciesOpen ? "rotate-90" : ""}`} />
+          </button>
+          {dependenciesOpen && (
+            <div className="pl-2 space-y-3">
+              {/* Prerequisites */}
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-[11px] text-muted-foreground font-medium">Requires</span>
+                  <Popover open={depPickerOpen === "prerequisite"} onOpenChange={(v) => { setDepPickerOpen(v ? "prerequisite" : null); if (!v) setDepFilter(""); }}>
+                    <PopoverTrigger render={<button type="button" className="text-muted-foreground hover:text-foreground transition-colors cursor-pointer"><Plus className="size-3" /></button>} />
+                    <PopoverContent align="start" className="w-64 p-0">
+                      <Command>
+                        <CommandInput placeholder="Search issues..." value={depFilter} onValueChange={setDepFilter} />
+                        <CommandList>
+                          <CommandEmpty>No issues found</CommandEmpty>
+                          <CommandGroup>
+                            {allIssues
+                              .filter((i) => i.id !== id && !prerequisites.some((p) => p.depends_on_issue_id === i.id))
+                              .filter((i) => !depFilter || i.title.toLowerCase().includes(depFilter.toLowerCase()) || i.identifier.toLowerCase().includes(depFilter.toLowerCase()))
+                              .slice(0, 20)
+                              .map((i) => (
+                                <CommandItem
+                                  key={i.id}
+                                  value={`${i.identifier} ${i.title}`}
+                                  onSelect={async () => {
+                                    await api.createIssueDependency(id, { target_issue_id: i.id, direction: "prerequisite" });
+                                    refetchDeps();
+                                    setDepPickerOpen(null);
+                                    setDepFilter("");
+                                  }}
+                                >
+                                  <StatusIcon status={i.status} className="h-3 w-3 shrink-0" />
+                                  <span className="text-muted-foreground text-xs shrink-0">{i.identifier}</span>
+                                  <span className="truncate text-xs">{i.title}</span>
+                                </CommandItem>
+                              ))}
+                          </CommandGroup>
+                        </CommandList>
+                      </Command>
+                    </PopoverContent>
+                  </Popover>
+                </div>
+                {prerequisites.length === 0 ? (
+                  <p className="text-xs text-muted-foreground/60 px-2">None</p>
+                ) : (
+                  <div className="space-y-0.5">
+                    {prerequisites.map((dep) => (
+                      <div key={dep.id} className="flex items-center gap-1.5 group rounded-md px-2 py-1 -mx-2 hover:bg-accent/50 transition-colors">
+                        <StatusIcon status={dep.status as IssueStatus} className="h-3 w-3 shrink-0" />
+                        <AppLink href={paths.issueDetail(dep.depends_on_issue_id)} className="flex items-center gap-1.5 min-w-0 flex-1">
+                          <span className="text-muted-foreground text-xs shrink-0">{dep.identifier}</span>
+                          <span className="truncate text-xs">{dep.title}</span>
+                        </AppLink>
+                        <button
+                          type="button"
+                          className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-all cursor-pointer"
+                          onClick={async () => { await api.deleteIssueDependency(id, dep.id); refetchDeps(); }}
+                        >
+                          <span className="text-xs">×</span>
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Next Issues */}
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-[11px] text-muted-foreground font-medium">Then runs</span>
+                  <Popover open={depPickerOpen === "next"} onOpenChange={(v) => { setDepPickerOpen(v ? "next" : null); if (!v) setDepFilter(""); }}>
+                    <PopoverTrigger render={<button type="button" className="text-muted-foreground hover:text-foreground transition-colors cursor-pointer"><Plus className="size-3" /></button>} />
+                    <PopoverContent align="start" className="w-64 p-0">
+                      <Command>
+                        <CommandInput placeholder="Search issues..." value={depFilter} onValueChange={setDepFilter} />
+                        <CommandList>
+                          <CommandEmpty>No issues found</CommandEmpty>
+                          <CommandGroup>
+                            {allIssues
+                              .filter((i) => i.id !== id && !nextIssues.some((n) => n.issue_id === i.id))
+                              .filter((i) => !depFilter || i.title.toLowerCase().includes(depFilter.toLowerCase()) || i.identifier.toLowerCase().includes(depFilter.toLowerCase()))
+                              .slice(0, 20)
+                              .map((i) => (
+                                <CommandItem
+                                  key={i.id}
+                                  value={`${i.identifier} ${i.title}`}
+                                  onSelect={async () => {
+                                    await api.createIssueDependency(id, { target_issue_id: i.id, direction: "next" });
+                                    refetchDeps();
+                                    setDepPickerOpen(null);
+                                    setDepFilter("");
+                                  }}
+                                >
+                                  <StatusIcon status={i.status} className="h-3 w-3 shrink-0" />
+                                  <span className="text-muted-foreground text-xs shrink-0">{i.identifier}</span>
+                                  <span className="truncate text-xs">{i.title}</span>
+                                </CommandItem>
+                              ))}
+                          </CommandGroup>
+                        </CommandList>
+                      </Command>
+                    </PopoverContent>
+                  </Popover>
+                </div>
+                {nextIssues.length === 0 ? (
+                  <p className="text-xs text-muted-foreground/60 px-2">None</p>
+                ) : (
+                  <div className="space-y-0.5">
+                    {nextIssues.map((dep) => (
+                      <div key={dep.id} className="flex items-center gap-1.5 group rounded-md px-2 py-1 -mx-2 hover:bg-accent/50 transition-colors">
+                        <StatusIcon status={dep.status as IssueStatus} className="h-3 w-3 shrink-0" />
+                        <AppLink href={paths.issueDetail(dep.issue_id)} className="flex items-center gap-1.5 min-w-0 flex-1">
+                          <span className="text-muted-foreground text-xs shrink-0">{dep.identifier}</span>
+                          <span className="truncate text-xs">{dep.title}</span>
+                        </AppLink>
+                        <button
+                          type="button"
+                          className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-all cursor-pointer"
+                          onClick={async () => { await api.deleteIssueDependency(id, dep.id); refetchDeps(); }}
+                        >
+                          <span className="text-xs">×</span>
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       )}
 

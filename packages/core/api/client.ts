@@ -75,6 +75,8 @@ import type {
   ListAutopilotsResponse,
   GetAutopilotResponse,
   ListAutopilotRunsResponse,
+  IssueDependency,
+  IssueDependenciesResponse,
 } from "../types";
 import type { OnboardingCompletionPath } from "../onboarding/types";
 import { type Logger, noopLogger } from "../logger";
@@ -456,6 +458,25 @@ export class ApiClient {
 
   async deleteIssue(id: string): Promise<void> {
     await this.fetch(`/api/issues/${id}`, { method: "DELETE" });
+  }
+
+  // Issue Dependencies
+  async listIssueDependencies(issueId: string): Promise<IssueDependenciesResponse> {
+    return this.fetch(`/api/issues/${issueId}/dependencies`);
+  }
+
+  async createIssueDependency(issueId: string, data: {
+    target_issue_id: string;
+    direction: "prerequisite" | "next";
+  }): Promise<IssueDependency> {
+    return this.fetch(`/api/issues/${issueId}/dependencies`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteIssueDependency(issueId: string, depId: string): Promise<void> {
+    await this.fetch(`/api/issues/${issueId}/dependencies/${depId}`, { method: "DELETE" });
   }
 
   async batchUpdateIssues(issueIds: string[], updates: UpdateIssueRequest): Promise<{ updated: number }> {
