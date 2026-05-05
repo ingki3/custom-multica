@@ -408,6 +408,18 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/tasks", h.ListAgentTasks)
 					r.Get("/skills", h.ListAgentSkills)
 					r.Put("/skills", h.SetAgentSkills)
+					r.Get("/mcp-servers", h.ListAgentMcpServers)
+					r.Put("/mcp-servers", h.SetAgentMcpServers)
+				})
+			})
+
+			// MCP Servers (workspace-level registry)
+			r.Route("/api/mcp-servers", func(r chi.Router) {
+				r.Get("/", h.ListMcpServers)
+				r.Post("/", h.CreateMcpServer)
+				r.Route("/{id}", func(r chi.Router) {
+					r.Put("/", h.UpdateMcpServer)
+					r.Delete("/", h.DeleteMcpServer)
 				})
 			})
 

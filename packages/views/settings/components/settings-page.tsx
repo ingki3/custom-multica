@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { User, Palette, Key, Settings, Users, FolderGit2, FlaskConical } from "lucide-react";
+import { User, Palette, Key, Settings, Users, FolderGit2, FlaskConical, Plug } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@multica/ui/components/ui/tabs";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { AccountTab } from "./account-tab";
@@ -11,6 +11,7 @@ import { WorkspaceTab } from "./workspace-tab";
 import { MembersTab } from "./members-tab";
 import { RepositoriesTab } from "./repositories-tab";
 import { LabsTab } from "./labs-tab";
+import { McpServersTab } from "./mcp-servers-tab";
 
 const accountTabs = [
   { value: "profile", label: "Profile", icon: User },
@@ -22,6 +23,7 @@ const workspaceTabs = [
   { value: "workspace", label: "General", icon: Settings },
   { value: "repositories", label: "Repositories", icon: FolderGit2 },
   { value: "labs", label: "Labs", icon: FlaskConical },
+  { value: "mcp-servers", label: "MCP Servers", icon: Plug },
   { value: "members", label: "Members", icon: Users },
 ];
 
@@ -85,6 +87,7 @@ export function SettingsPage({ extraAccountTabs }: SettingsPageProps = {}) {
           <TabsContent value="workspace"><WorkspaceTab /></TabsContent>
           <TabsContent value="repositories"><RepositoriesTab /></TabsContent>
           <TabsContent value="labs"><LabsTab /></TabsContent>
+          <TabsContent value="mcp-servers"><McpServersTab /></TabsContent>
           <TabsContent value="members"><MembersTab /></TabsContent>
           {extraAccountTabs?.map((tab) => (
             <TabsContent key={tab.value} value={tab.value}>{tab.content}</TabsContent>

@@ -77,6 +77,10 @@ import type {
   ListAutopilotRunsResponse,
   IssueDependency,
   IssueDependenciesResponse,
+  McpServer,
+  CreateMcpServerRequest,
+  UpdateMcpServerRequest,
+  AgentMcpServerEntry,
 } from "../types";
 import type { OnboardingCompletionPath } from "../onboarding/types";
 import { type Logger, noopLogger } from "../logger";
@@ -1092,6 +1096,41 @@ export class ApiClient {
     if (showHidden) search.set("showHidden", "true");
     const qs = search.toString();
     return this.fetch(`/api/fs/dirs${qs ? `?${qs}` : ""}`);
+  }
+
+  // Workspace MCP Servers
+  async listMcpServers(): Promise<McpServer[]> {
+    return this.fetch("/api/mcp-servers");
+  }
+
+  async createMcpServer(data: CreateMcpServerRequest): Promise<McpServer> {
+    return this.fetch("/api/mcp-servers", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateMcpServer(id: string, data: UpdateMcpServerRequest): Promise<McpServer> {
+    return this.fetch(`/api/mcp-servers/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteMcpServer(id: string): Promise<void> {
+    await this.fetch(`/api/mcp-servers/${id}`, { method: "DELETE" });
+  }
+
+  // Agent MCP Servers (shared selection)
+  async listAgentMcpServers(agentId: string): Promise<McpServer[]> {
+    return this.fetch(`/api/agents/${agentId}/mcp-servers`);
+  }
+
+  async setAgentMcpServers(agentId: string, data: { servers: AgentMcpServerEntry[] }): Promise<void> {
+    await this.fetch(`/api/agents/${agentId}/mcp-servers`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
   }
 
   // Labels
