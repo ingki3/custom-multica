@@ -710,6 +710,14 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 		}
 	}
 
+	// Activate next issues if this issue reached done (agent may have set it
+	// directly to done during execution, bypassing in_review).
+	if task.IssueID.Valid {
+		if issue, err := s.Queries.GetIssue(ctx, task.IssueID); err == nil && issue.Status == "done" {
+			s.ActivateNextIssues(ctx, task.IssueID)
+		}
+	}
+
 	// Reconcile agent status
 	s.ReconcileAgentStatus(ctx, task.AgentID)
 
@@ -717,6 +725,38 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 	s.broadcastTaskEvent(ctx, protocol.EventTaskCompleted, task)
 
 	return &task, nil
+}
+
+// ActivateNextIssues checks for issues that depend on the given issue and
+// activates them if all their prerequisites are now met (done).
+func (s *TaskService) ActivateNextIssues(ctx context.Context, issueID pgtype.UUID) {
+	nextIssues, err := s.Queries.ListUnblockedNextIssues(ctx, issueID)
+	if err != nil {
+		slog.Warn("activate next issues: list failed", "issue_id", util.UUIDToString(issueID), "error", err)
+		return
+	}
+
+	for _, next := range nextIssues {
+		if next.Status == "todo" || next.Status == "backlog" {
+			updated, err := s.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
+				ID:     next.ID,
+				Status: "in_progress",
+			})
+			if err != nil {
+				slog.Warn("activate next issue: status update failed", "issue_id", util.UUIDToString(next.ID), "error", err)
+				continue
+			}
+			slog.Info("dependency satisfied: activated next issue", "issue_id", util.UUIDToString(next.ID), "triggered_by", util.UUIDToString(issueID))
+			s.broadcastIssueUpdated(updated)
+
+			// Enqueue task if the issue has an agent assignee
+			if next.AssigneeType.String == "agent" && next.AssigneeID.Valid {
+				if _, err := s.EnqueueTaskForIssue(ctx, next); err != nil {
+					slog.Warn("activate next issue: enqueue failed", "issue_id", util.UUIDToString(next.ID), "error", err)
+				}
+			}
+		}
+	}
 }
 
 // FailTask marks a task as failed.

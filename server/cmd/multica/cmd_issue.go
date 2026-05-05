@@ -228,6 +228,8 @@ func init() {
 	issueCreateCmd.Flags().String("due-date", "", "Due date (RFC3339 format)")
 	issueCreateCmd.Flags().String("output", "json", "Output format: table or json")
 	issueCreateCmd.Flags().StringSlice("attachment", nil, "File path(s) to attach (can be specified multiple times)")
+	issueCreateCmd.Flags().StringSlice("requires", nil, "Issue ID(s) that must be done before this issue can run (prerequisite)")
+	issueCreateCmd.Flags().StringSlice("then-runs", nil, "Issue ID(s) that will auto-run when this issue is done (next issues)")
 
 	// issue update
 	issueUpdateCmd.Flags().String("title", "", "New title")
@@ -240,6 +242,8 @@ func init() {
 	issueUpdateCmd.Flags().String("due-date", "", "New due date (RFC3339 format)")
 	issueUpdateCmd.Flags().String("parent", "", "Parent issue ID (use --parent \"\" to clear)")
 	issueUpdateCmd.Flags().String("output", "json", "Output format: table or json")
+	issueUpdateCmd.Flags().StringSlice("requires", nil, "Issue ID(s) that must be done before this issue can run (prerequisite)")
+	issueUpdateCmd.Flags().StringSlice("then-runs", nil, "Issue ID(s) that will auto-run when this issue is done (next issues)")
 
 	// issue status
 	issueStatusCmd.Flags().String("output", "table", "Output format: table or json")
@@ -546,6 +550,24 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 		fmt.Fprintf(os.Stderr, "Uploaded %s\n", att.path)
 	}
 
+	// Set dependencies after issue creation.
+	if reqs, _ := cmd.Flags().GetStringSlice("requires"); len(reqs) > 0 {
+		for _, reqID := range reqs {
+			depBody := map[string]any{"target_issue_id": reqID, "direction": "prerequisite"}
+			if err := client.PostJSON(ctx, fmt.Sprintf("/api/issues/%s/dependencies", issueID), depBody, nil); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: add prerequisite %s failed: %v\n", reqID, err)
+			}
+		}
+	}
+	if runs, _ := cmd.Flags().GetStringSlice("then-runs"); len(runs) > 0 {
+		for _, runID := range runs {
+			depBody := map[string]any{"target_issue_id": runID, "direction": "next"}
+			if err := client.PostJSON(ctx, fmt.Sprintf("/api/issues/%s/dependencies", issueID), depBody, nil); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: add next issue %s failed: %v\n", runID, err)
+			}
+		}
+	}
+
 	output, _ := cmd.Flags().GetString("output")
 	if output == "table" {
 		headers := []string{"ID", "TITLE", "STATUS", "PRIORITY"}
@@ -617,13 +639,39 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	if len(body) == 0 {
+	// Dependencies can be set even without other field updates.
+	requiresFlag, _ := cmd.Flags().GetStringSlice("requires")
+	thenRunsFlag, _ := cmd.Flags().GetStringSlice("then-runs")
+	hasDeps := len(requiresFlag) > 0 || len(thenRunsFlag) > 0
+
+	if len(body) == 0 && !hasDeps {
 		return fmt.Errorf("no fields to update; use flags like --title, --status, --priority, --assignee, etc.")
 	}
 
 	var result map[string]any
-	if err := client.PutJSON(ctx, "/api/issues/"+args[0], body, &result); err != nil {
-		return fmt.Errorf("update issue: %w", err)
+	if len(body) > 0 {
+		if err := client.PutJSON(ctx, "/api/issues/"+args[0], body, &result); err != nil {
+			return fmt.Errorf("update issue: %w", err)
+		}
+	} else {
+		// Fetch current issue for output when only dependencies change
+		if err := client.GetJSON(ctx, "/api/issues/"+args[0], &result); err != nil {
+			return fmt.Errorf("get issue: %w", err)
+		}
+	}
+
+	issueID := args[0]
+	for _, reqID := range requiresFlag {
+		depBody := map[string]any{"target_issue_id": reqID, "direction": "prerequisite"}
+		if err := client.PostJSON(ctx, fmt.Sprintf("/api/issues/%s/dependencies", issueID), depBody, nil); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: add prerequisite %s failed: %v\n", reqID, err)
+		}
+	}
+	for _, runID := range thenRunsFlag {
+		depBody := map[string]any{"target_issue_id": runID, "direction": "next"}
+		if err := client.PostJSON(ctx, fmt.Sprintf("/api/issues/%s/dependencies", issueID), depBody, nil); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: add next issue %s failed: %v\n", runID, err)
+		}
 	}
 
 	output, _ := cmd.Flags().GetString("output")

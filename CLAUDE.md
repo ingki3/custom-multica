@@ -385,6 +385,34 @@ By default, bump the patch version each release (e.g. `v0.1.12` → `v0.1.13`), 
 
 All queries filter by `workspace_id`. Membership checks gate access. `X-Workspace-ID` header routes requests to the correct workspace.
 
+## Issue Dependencies (Execution Ordering)
+
+Issues can have prerequisite/next relationships to control execution order:
+
+```bash
+# Create with dependencies
+multica issue create --title "Step B" --requires <issue-A-id> --then-runs <issue-C-id>
+
+# Add dependencies to existing issue
+multica issue update <id> --requires <prereq-id>
+multica issue update <id> --then-runs <next-id>
+```
+
+**CLI flags:**
+- `--requires <issue-id>` — This issue cannot run until the specified issue is Done. Repeatable.
+- `--then-runs <issue-id>` — When this issue is Done, the specified issue auto-starts. Repeatable.
+
+**Behavior:**
+- Bidirectional: setting A as prerequisite of B automatically makes B a "then-runs" of A.
+- `ClaimAgentTask` skips issues with unmet prerequisites.
+- When an issue reaches Done, all unblocked next issues auto-transition to `in_progress` + agent task creation.
+- Circular dependencies are rejected at creation time.
+
+**API:**
+- `GET /api/issues/{id}/dependencies` — lists prerequisites + next issues
+- `POST /api/issues/{id}/dependencies` — `{ target_issue_id, direction: "prerequisite" | "next" }`
+- `DELETE /api/issues/{id}/dependencies/{depId}`
+
 ## Agent Assignees
 
 Assignees are polymorphic — can be a member or an agent. `assignee_type` + `assignee_id` on issues. Agents render with distinct styling (purple background, robot icon).
