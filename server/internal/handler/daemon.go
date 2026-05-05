@@ -847,10 +847,9 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 				slog.Warn("failed to unmarshal agent custom_args", "agent_id", uuidToString(agent.ID), "error", err)
 			}
 		}
-		var mcpConfig json.RawMessage
-		if agent.McpConfig != nil {
-			mcpConfig = json.RawMessage(agent.McpConfig)
-		}
+		// Merge workspace-shared MCP servers with agent-level config.
+		// Shared servers provide the base; agent-level overrides win on name conflict.
+		mcpConfig := mergeMcpConfig(agent.McpConfig, h.Queries, r.Context(), agent.ID)
 		resp.Agent = &TaskAgentData{
 			ID:           uuidToString(agent.ID),
 			Name:         agent.Name,
@@ -1646,4 +1645,80 @@ func (h *Handler) GetIssueGCCheck(w http.ResponseWriter, r *http.Request) {
 		"status":     issue.Status,
 		"updated_at": issue.UpdatedAt.Time,
 	})
+}
+
+// mergeMcpConfig combines workspace-shared MCP servers with agent-level
+// mcp_config. Shared servers provide the base; agent-level config wins on
+// name conflict (allowing per-agent overrides of shared servers).
+func mergeMcpConfig(agentConfig []byte, q *db.Queries, ctx context.Context, agentID pgtype.UUID) json.RawMessage {
+	shared, err := q.ListAgentSharedMcpServers(ctx, agentID)
+	if err != nil {
+		slog.Warn("list shared mcp servers failed", "error", err)
+		// Fall back to agent-only config
+		if len(agentConfig) > 0 {
+			return json.RawMessage(agentConfig)
+		}
+		return nil
+	}
+
+	// If no shared servers and no agent config, return nil
+	if len(shared) == 0 && len(agentConfig) == 0 {
+		return nil
+	}
+
+	// Build merged mcpServers map
+	servers := map[string]any{}
+
+	// 1. Add shared servers (base layer)
+	for _, s := range shared {
+		server := map[string]any{"transport": s.Transport}
+		if s.Command.Valid {
+			server["command"] = s.Command.String
+		}
+		if s.Url.Valid {
+			server["url"] = s.Url.String
+		}
+		var args []string
+		if len(s.Args) > 0 {
+			json.Unmarshal(s.Args, &args)
+		}
+		if len(args) > 0 {
+			server["args"] = args
+		}
+		// Merge base env + override
+		env := map[string]string{}
+		if len(s.Env) > 0 {
+			json.Unmarshal(s.Env, &env)
+		}
+		if len(s.EnvOverride) > 0 {
+			var override map[string]string
+			json.Unmarshal(s.EnvOverride, &override)
+			for k, v := range override {
+				env[k] = v
+			}
+		}
+		if len(env) > 0 {
+			server["env"] = env
+		}
+		servers[s.Name] = server
+	}
+
+	// 2. Overlay agent-level config (wins on name conflict)
+	if len(agentConfig) > 0 {
+		var agentMcp map[string]any
+		if json.Unmarshal(agentConfig, &agentMcp) == nil {
+			if agentServers, ok := agentMcp["mcpServers"].(map[string]any); ok {
+				for k, v := range agentServers {
+					servers[k] = v
+				}
+			}
+		}
+	}
+
+	if len(servers) == 0 {
+		return nil
+	}
+
+	result, _ := json.Marshal(map[string]any{"mcpServers": servers})
+	return result
 }

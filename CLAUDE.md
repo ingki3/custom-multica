@@ -15,8 +15,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 # 백엔드 재시작 (데몬은 자동 시작됨)
 kill $(lsof -t -i :8080) 2>/dev/null; sleep 1; make server &disown
 
-# 프론트엔드 재시작 (Next.js 직접 실행 — turbo 경유 시 약 2시간 후 자동 종료됨)
-kill $(lsof -t -i :3000) 2>/dev/null; sleep 1; cd apps/web && nohup npx next dev --port ${FRONTEND_PORT:-3000} > /tmp/multica-frontend.log 2>&1 & cd -
+# 프론트엔드 재시작 (자동 재시작 래퍼 — 죽으면 3초 후 자동 복구)
+kill $(lsof -t -i :3000) 2>/dev/null; sleep 1; nohup scripts/start-frontend.sh >> /tmp/multica-frontend.log 2>&1 &
+# 코드 변경 후에는 먼저 pnpm build 실행 필요. 로그: /tmp/multica-frontend.log
 
 # 또는 한 번에 전부 시작
 make dev
