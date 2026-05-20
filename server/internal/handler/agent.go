@@ -156,8 +156,10 @@ type AgentTaskResponse struct {
 	AutopilotSource         string          `json:"autopilot_source,omitempty"`          // manual, schedule, webhook, or api
 	AutopilotTriggerPayload json.RawMessage `json:"autopilot_trigger_payload,omitempty"` // optional trigger payload for webhook/api runs
 	QuickCreatePrompt       string          `json:"quick_create_prompt,omitempty"`       // user's natural-language input for quick-create tasks
-	WorkingFolder           string          `json:"working_folder,omitempty"`            // project-level local folder override for agent workdir
-	Kind                    string          `json:"kind"`                                // discriminator: "comment" | "autopilot" | "chat" | "quick_create" | "direct" — used by the activity row to label tasks that have no linked issue
+	WorkingFolder                    string          `json:"working_folder,omitempty"`                    // project-level local folder override for agent workdir
+	Kind                             string          `json:"kind"`                                        // discriminator: "comment" | "autopilot" | "chat" | "quick_create" | "direct" — used by the activity row to label tasks that have no linked issue
+	RequestingUserName               string          `json:"requesting_user_name,omitempty"`               // runtime owner display name for agent brief
+	RequestingUserProfileDescription string          `json:"requesting_user_profile_description,omitempty"` // runtime owner profile description for agent brief
 }
 
 // TaskAgentData holds agent info included in claim responses so the daemon
