@@ -21,6 +21,12 @@
     3. **UI**: Settings 페이지에 "MCP Servers" 관리 섹션 추가 (CRUD). 에이전트 상세 MCP 탭에서 워크스페이스 등록 서버 선택 체크박스 + 개별 설정 병행 가능.
     4. **데몬 연동**: 태스크 claim 시 에이전트의 개별 `mcp_config` + 워크스페이스 공유 MCP 서버를 병합하여 전달.
   - **하위 호환**: 기존 에이전트별 `mcp_config` 필드는 유지 — 개별 설정과 공유 설정이 병합됨.
+- [x] **[Upstream] Auth Token TTL** (MUL-2371) — `AUTH_TOKEN_TTL` 환경변수로 인증 토큰 만료 시간 설정. 기본 30일, Go duration 문자열 지원. `auth/cookie.go`에 `AuthTokenTTL()` 함수 + `parseAuthTokenTTL()` 파서 추가. `SetAuthCookies`에서 동적 TTL 사용.
+- [x] **[Upstream] Parent/Sub-Issue Protocol** (MUL-2338) — 에이전트에게 부모-자식 이슈 관계 워크플로우 교육. runtime_config.go에 "Parent / Sub-issue Protocol" brief 섹션 추가: 자식 완료 시 부모에 보고, sub-issue 생성 시 status 전략(todo vs backlog).
+- [x] **[Upstream] User Profile Description** (MUL-2406) — 사용자 프로필 설명을 에이전트 브리핑에 주입. Migration 068로 user.profile_description 추가. runtime_config.go에 "Requesting User" 섹션 + sanitizeNameForBriefMarkdown 헬퍼. ClaimTask에서 runtime owner 프로필 조회 및 전달.
+- [ ] **[Upstream] Project Gantt View** (MUL-1881) — 프로젝트 상세에 간트 차트 뷰 추가. 프론트엔드 전용, start_date 필드 필요.
+- [ ] **[Upstream] Issue Prefix Edit** (MUL-2369) — 워크스페이스 이슈 접두사 변경 UI. Settings → General에서 편집.
+- [ ] **[Upstream] Agent Thinking Level** (MUL-2339) — 에이전트별 thinking level 설정 (Claude/Codex). 마이그레이션 필요, ~2000줄 대규모 변경.
 - [ ] **Admin 2.0 제작 계획 수립** (BIZ-108) — admin.pen 디자인 파일 점검 → Design Agent가 부족한 부분 보완 → Dev Agent가 서브 이슈 분해 → `--requires`/`--then-runs`로 순서 설정하여 순차 개발 진행. 3단계 워크플로: 1) Design Agent 디자인 점검/보완 2) Dev Agent 서브이슈 분해 3) 서브이슈 순차 실행.
 - [x] **이슈 간 의존성 기반 실행 순서 제어** — 이슈에 선행 조건(prerequisites)과 후속 이슈(next issues)를 설정하여, 선행 이슈가 모두 Done이 되면 후속 이슈가 자동으로 In Progress로 전환되어 순서대로 개발이 진행되도록 한다. Migration 066으로 type 제약 변경 + 인덱스 + unique 추가. `issue_dependency.sql`에 CRUD + 순환검사 쿼리. `ClaimAgentTask`에 선행이슈 검사 추가. `ActivateNextIssues`로 Done 시 후속 이슈 자동 활성화. REST API (`GET/POST/DELETE /api/issues/{id}/dependencies`) + 프론트엔드 타입 + API 클라이언트 구현.
   - **핵심 개념**:

@@ -48,6 +48,11 @@ type TaskContextForEnv struct {
 	AutopilotSource         string
 	AutopilotTriggerPayload string
 	QuickCreatePrompt       string // non-empty for quick-create tasks
+	// RequestingUserName + RequestingUserProfileDescription describe the
+	// human the agent is acting on behalf of. Rendered into the brief as
+	// the "## Requesting User" section only when description is non-empty.
+	RequestingUserName               string
+	RequestingUserProfileDescription string
 }
 
 // SkillContextForEnv represents a skill to be written into the execution environment.
