@@ -48,6 +48,8 @@ type Task struct {
 	AutopilotTriggerPayload json.RawMessage `json:"autopilot_trigger_payload,omitempty"` // optional trigger payload for webhook/api runs
 	QuickCreatePrompt       string          `json:"quick_create_prompt,omitempty"`       // user's natural-language input for quick-create tasks
 	WorkingFolder           string          `json:"working_folder,omitempty"`            // project-level local folder override for agent workdir
+	RequestingUserName               string `json:"requesting_user_name,omitempty"`               // runtime owner display name
+	RequestingUserProfileDescription string `json:"requesting_user_profile_description,omitempty"` // runtime owner profile description
 }
 
 // AgentData holds agent details returned by the claim endpoint.

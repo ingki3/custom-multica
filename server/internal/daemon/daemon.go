@@ -1187,7 +1187,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 		AutopilotDescription:    task.AutopilotDescription,
 		AutopilotSource:         task.AutopilotSource,
 		AutopilotTriggerPayload: strings.TrimSpace(string(task.AutopilotTriggerPayload)),
-		QuickCreatePrompt:       task.QuickCreatePrompt,
+		QuickCreatePrompt:                task.QuickCreatePrompt,
+		RequestingUserName:               task.RequestingUserName,
+		RequestingUserProfileDescription: task.RequestingUserProfileDescription,
 	}
 
 	// Determine working directory with 3-tier priority:
