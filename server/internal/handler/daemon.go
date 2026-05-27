@@ -874,18 +874,16 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 	if task.IssueID.Valid {
 		if issue, err := h.Queries.GetIssue(r.Context(), task.IssueID); err == nil {
 			resp.WorkspaceID = uuidToString(issue.WorkspaceID)
-			if ws, err := h.Queries.GetWorkspace(r.Context(), issue.WorkspaceID); err == nil && ws.Repos != nil {
-				var repos []RepoData
-				if json.Unmarshal(ws.Repos, &repos) == nil && len(repos) > 0 {
-					resp.Repos = repos
-				}
-			}
-			// Propagate project-level working_folder to the daemon.
-			if issue.ProjectID.Valid {
-				if proj, err := h.Queries.GetProject(r.Context(), issue.ProjectID); err == nil {
-					if proj.WorkingFolder.Valid {
-						resp.WorkingFolder = proj.WorkingFolder.String
+			if ws, err := h.Queries.GetWorkspace(r.Context(), issue.WorkspaceID); err == nil {
+				if ws.Repos != nil {
+					var repos []RepoData
+					if json.Unmarshal(ws.Repos, &repos) == nil && len(repos) > 0 {
+						resp.Repos = repos
 					}
+				}
+				// Propagate workspace-level working_folder to the daemon.
+				if ws.WorkingFolder.Valid {
+					resp.WorkingFolder = ws.WorkingFolder.String
 				}
 			}
 		}
@@ -1002,12 +1000,10 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 						}
 					}
 				}
-				// Propagate project-level working_folder for run_only autopilots.
-				if ap.ProjectID.Valid && resp.WorkingFolder == "" {
-					if proj, err := h.Queries.GetProject(r.Context(), ap.ProjectID); err == nil {
-						if proj.WorkingFolder.Valid {
-							resp.WorkingFolder = proj.WorkingFolder.String
-						}
+				// Propagate workspace-level working_folder for run_only autopilots.
+				if resp.WorkingFolder == "" {
+					if ws, err := h.Queries.GetWorkspace(r.Context(), ap.WorkspaceID); err == nil && ws.WorkingFolder.Valid {
+						resp.WorkingFolder = ws.WorkingFolder.String
 					}
 				}
 			}

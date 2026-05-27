@@ -173,7 +173,7 @@ func (q *Queries) ListPrerequisites(ctx context.Context, issueID pgtype.UUID) ([
 }
 
 const listUnblockedNextIssues = `-- name: ListUnblockedNextIssues :many
-SELECT DISTINCT i.id, i.workspace_id, i.title, i.description, i.status, i.priority, i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.origin_type, i.origin_id, i.first_executed_at FROM issue i
+SELECT DISTINCT i.id, i.workspace_id, i.title, i.description, i.status, i.priority, i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.origin_type, i.origin_id, i.first_executed_at, i.start_date FROM issue i
 JOIN issue_dependency dep ON dep.issue_id = i.id AND dep.depends_on_issue_id = $1
 WHERE NOT EXISTS (
     SELECT 1 FROM issue_dependency other_dep
@@ -216,6 +216,7 @@ func (q *Queries) ListUnblockedNextIssues(ctx context.Context, dependsOnIssueID 
 			&i.OriginType,
 			&i.OriginID,
 			&i.FirstExecutedAt,
+			&i.StartDate,
 		); err != nil {
 			return nil, err
 		}

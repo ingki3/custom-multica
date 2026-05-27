@@ -2,7 +2,7 @@
 
 import { useMemo, useState, useCallback, useRef, useEffect } from "react";
 import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
-import { Check, ChevronRight, FolderOpen, Link2, ListTodo, MoreHorizontal, PanelRight, Pin, PinOff, Trash2, UserMinus } from "lucide-react";
+import { Check, ChevronRight, Link2, ListTodo, MoreHorizontal, PanelRight, Pin, PinOff, Trash2, UserMinus } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { cn } from "@multica/ui/lib/utils";
 import { toast } from "sonner";
@@ -31,6 +31,7 @@ import { PriorityIcon } from "../../issues/components/priority-icon";
 import { IssuesHeader } from "../../issues/components/issues-header";
 import { BoardView } from "../../issues/components/board-view";
 import { ListView } from "../../issues/components/list-view";
+import { GanttView } from "../../issues/components/gantt-view";
 import { BatchActionToolbar } from "../../issues/components/batch-action-toolbar";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Button } from "@multica/ui/components/ui/button";
@@ -55,7 +56,6 @@ import {
   TooltipContent,
 } from "@multica/ui/components/ui/tooltip";
 import { EmojiPicker } from "@multica/ui/components/common/emoji-picker";
-import { FolderPickerDialog } from "../../common/folder-picker-dialog";
 import { PageHeader } from "../../layout/page-header";
 import {
   AlertDialog,
@@ -161,7 +161,9 @@ function ProjectIssuesContent({
 
   return (
     <div className="flex flex-col flex-1 min-h-0">
-      {viewMode === "board" ? (
+      {viewMode === "gantt" ? (
+        <GanttView issues={issues} />
+      ) : viewMode === "board" ? (
         <BoardView
           issues={issues}
           visibleStatuses={visibleStatuses}
@@ -223,7 +225,6 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const [propertiesOpen, setPropertiesOpen] = useState(true);
   const [progressOpen, setProgressOpen] = useState(true);
   const [descriptionOpen, setDescriptionOpen] = useState(true);
-  const [folderPickerOpen, setFolderPickerOpen] = useState(false);
 
   // Sidebar panel
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
@@ -447,58 +448,6 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
             </Popover>
           </PropRow>
 
-          <PropRow label="Folder">
-            <div className="flex items-center gap-1 w-full">
-              <input
-                type="text"
-                defaultValue={project.working_folder || ""}
-                placeholder="Not set"
-                className="text-xs bg-transparent border-none outline-none flex-1 min-w-0 text-foreground placeholder:text-muted-foreground"
-                onBlur={(e) => {
-                  const val = e.target.value.trim();
-                  const current = project.working_folder || "";
-                  if (val !== current) {
-                    handleUpdateField({ working_folder: val || null });
-                  }
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    (e.target as HTMLInputElement).blur();
-                  }
-                }}
-              />
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <button
-                      type="button"
-                      className="shrink-0 rounded p-0.5 hover:bg-accent/60 transition-colors cursor-pointer"
-                      onClick={async () => {
-                        const desktopAPI = typeof window !== "undefined"
-                          ? (window as unknown as { desktopAPI?: { selectFolder?: () => Promise<string | null> } }).desktopAPI
-                          : undefined;
-                        if (desktopAPI?.selectFolder) {
-                          const folder = await desktopAPI.selectFolder();
-                          if (folder) handleUpdateField({ working_folder: folder });
-                        } else {
-                          setFolderPickerOpen(true);
-                        }
-                      }}
-                    >
-                      <FolderOpen className="size-3.5 text-muted-foreground" />
-                    </button>
-                  }
-                />
-                <TooltipContent side="top">Browse folder</TooltipContent>
-              </Tooltip>
-              <FolderPickerDialog
-                open={folderPickerOpen}
-                onOpenChange={setFolderPickerOpen}
-                onSelect={(folder) => handleUpdateField({ working_folder: folder })}
-                initialPath={project.working_folder || undefined}
-              />
-            </div>
-          </PropRow>
         </div>}
       </div>
 

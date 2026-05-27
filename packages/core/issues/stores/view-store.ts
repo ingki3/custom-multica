@@ -9,8 +9,8 @@ import { ALL_STATUSES } from "../config";
 import { createWorkspaceAwareStorage, registerForWorkspaceRehydration } from "../../platform/workspace-storage";
 import { defaultStorage } from "../../platform/storage";
 
-export type ViewMode = "board" | "list";
-export type SortField = "position" | "priority" | "due_date" | "created_at" | "title";
+export type ViewMode = "board" | "list" | "gantt";
+export type SortField = "position" | "priority" | "start_date" | "due_date" | "created_at" | "title";
 export type SortDirection = "asc" | "desc";
 
 export interface CardProperties {
@@ -31,6 +31,7 @@ export interface ActorFilterValue {
 export const SORT_OPTIONS: { value: SortField; label: string }[] = [
   { value: "position", label: "Manual" },
   { value: "priority", label: "Priority" },
+  { value: "start_date", label: "Start date" },
   { value: "due_date", label: "Due date" },
   { value: "created_at", label: "Created date" },
   { value: "title", label: "Title" },
