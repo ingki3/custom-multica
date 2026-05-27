@@ -24,7 +24,7 @@
 - [x] **[Upstream] Auth Token TTL** (MUL-2371) — `AUTH_TOKEN_TTL` 환경변수로 인증 토큰 만료 시간 설정. 기본 30일, Go duration 문자열 지원. `auth/cookie.go`에 `AuthTokenTTL()` 함수 + `parseAuthTokenTTL()` 파서 추가. `SetAuthCookies`에서 동적 TTL 사용.
 - [x] **[Upstream] Parent/Sub-Issue Protocol** (MUL-2338) — 에이전트에게 부모-자식 이슈 관계 워크플로우 교육. runtime_config.go에 "Parent / Sub-issue Protocol" brief 섹션 추가: 자식 완료 시 부모에 보고, sub-issue 생성 시 status 전략(todo vs backlog).
 - [x] **[Upstream] User Profile Description** (MUL-2406) — 사용자 프로필 설명을 에이전트 브리핑에 주입. Migration 068로 user.profile_description 추가. runtime_config.go에 "Requesting User" 섹션 + sanitizeNameForBriefMarkdown 헬퍼. ClaimTask에서 runtime owner 프로필 조회 및 전달.
-- [ ] **[Upstream] Project Gantt View** (MUL-1881) — 프로젝트 상세에 간트 차트 뷰 추가. 프론트엔드 전용, start_date 필드 필요.
+- [x] **[Upstream] Project Gantt View** (MUL-1881) — Migration 069로 issue.start_date 추가. Go 핸들러 start_date CRUD 구현. Gantt 뷰 컴포넌트(~220줄) SVG/HTML 기반. 프로젝트 상세 Board/List/Gantt 토글. 줌(day/week/month), show-completed 지원.
 - [ ] **[Upstream] Issue Prefix Edit** (MUL-2369) — 워크스페이스 이슈 접두사 변경 UI. Settings → General에서 편집.
 - [ ] **[Upstream] Agent Thinking Level** (MUL-2339) — 에이전트별 thinking level 설정 (Claude/Codex). 마이그레이션 필요, ~2000줄 대규모 변경.
 - [ ] **Admin 2.0 제작 계획 수립** (BIZ-108) — admin.pen 디자인 파일 점검 → Design Agent가 부족한 부분 보완 → Dev Agent가 서브 이슈 분해 → `--requires`/`--then-runs`로 순서 설정하여 순차 개발 진행. 3단계 워크플로: 1) Design Agent 디자인 점검/보완 2) Dev Agent 서브이슈 분해 3) 서브이슈 순차 실행.

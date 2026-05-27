@@ -1,14 +1,15 @@
 "use client";
 
-import { useCallback, memo } from "react";
+import { useCallback, memo, useMemo } from "react";
 import { AppLink } from "../../navigation";
 import { useSortable, defaultAnimateLayoutChanges } from "@dnd-kit/sortable";
 import type { AnimateLayoutChanges } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { toast } from "sonner";
 import type { Issue, UpdateIssueRequest } from "@multica/core/types";
-import { CalendarDays } from "lucide-react";
+import { CalendarDays, Loader2, Clock } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
+import { agentTaskSnapshotOptions } from "@multica/core/agents/queries";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
 import { useWorkspacePaths } from "@multica/core/paths";
@@ -63,6 +64,16 @@ export const BoardCardContent = memo(function BoardCardContent({
   const project = issue.project_id ? projects.find((p) => p.id === issue.project_id) : undefined;
   const labels = issue.labels ?? [];
 
+  // Task status for in_progress issues
+  const { data: taskSnapshot = [] } = useQuery({
+    ...agentTaskSnapshotOptions(wsId),
+    enabled: issue.status === "in_progress",
+  });
+  const activeTask = useMemo(() => {
+    if (issue.status !== "in_progress") return null;
+    return taskSnapshot.find((t) => t.issue_id === issue.id && (t.status === "running" || t.status === "queued" || t.status === "dispatched")) ?? null;
+  }, [taskSnapshot, issue.id, issue.status]);
+
   const updateIssueMutation = useUpdateIssue();
   const handleUpdate = useCallback(
     (updates: Partial<UpdateIssueRequest>) => {
@@ -84,8 +95,23 @@ export const BoardCardContent = memo(function BoardCardContent({
 
   return (
     <div className="rounded-lg border-[0.5px] border-border bg-card py-3 px-2.5 shadow-[0_3px_6px_-2px_rgba(0,0,0,0.02),0_1px_1px_0_rgba(0,0,0,0.04)] transition-colors group-hover/card:border-accent group-hover/card:bg-accent group-data-[popup-open]/card:border-accent group-data-[popup-open]/card:bg-accent">
-      {/* Row 1: Identifier */}
-      <p className="text-xs text-muted-foreground">{issue.identifier}</p>
+      {/* Row 1: Identifier + Task Status Badge */}
+      <div className="flex items-center justify-between">
+        <p className="text-xs text-muted-foreground">{issue.identifier}</p>
+        {activeTask && (
+          <span className={`inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium ${
+            activeTask.status === "running"
+              ? "bg-info/10 text-info"
+              : "bg-amber-500/10 text-amber-700 dark:text-amber-300"
+          }`}>
+            {activeTask.status === "running" ? (
+              <><Loader2 className="size-2.5 animate-spin" />Progress</>
+            ) : (
+              <><Clock className="size-2.5" />Queued</>
+            )}
+          </span>
+        )}
+      </div>
 
       {/* Row 2: Title */}
       <p className="mt-1 text-sm font-medium leading-snug line-clamp-2">

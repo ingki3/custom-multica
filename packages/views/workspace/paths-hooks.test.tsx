@@ -24,6 +24,7 @@ function makeWorkspace(over: Partial<Workspace>): Workspace {
     settings: {},
     repos: [],
     issue_prefix: "DEF",
+    working_folder: null,
     created_at: "",
     updated_at: "",
     ...over,

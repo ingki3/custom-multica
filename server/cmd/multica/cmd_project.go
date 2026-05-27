@@ -228,10 +228,6 @@ func runProjectCreate(cmd *cobra.Command, _ []string) error {
 		body["lead_type"] = aType
 		body["lead_id"] = aID
 	}
-	if v, _ := cmd.Flags().GetString("working-folder"); v != "" {
-		body["working_folder"] = v
-	}
-
 	var result map[string]any
 	if err := client.PostJSON(ctx, "/api/projects", body, &result); err != nil {
 		return fmt.Errorf("create project: %w", err)
@@ -287,17 +283,8 @@ func runProjectUpdate(cmd *cobra.Command, args []string) error {
 		body["lead_type"] = aType
 		body["lead_id"] = aID
 	}
-	if cmd.Flags().Changed("working-folder") {
-		v, _ := cmd.Flags().GetString("working-folder")
-		if v == "" {
-			body["working_folder"] = nil
-		} else {
-			body["working_folder"] = v
-		}
-	}
-
 	if len(body) == 0 {
-		return fmt.Errorf("no fields to update; use flags like --title, --status, --description, --icon, --lead, --working-folder")
+		return fmt.Errorf("no fields to update; use flags like --title, --status, --description, --icon, --lead")
 	}
 
 	var result map[string]any

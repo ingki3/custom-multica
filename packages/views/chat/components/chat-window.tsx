@@ -465,24 +465,7 @@ export function ChatWindow() {
         disabled={isSessionArchived}
         agentName={activeAgent?.name}
         topSlot={
-          <>
-            {activeProject && (
-              <div className="mx-2 mt-2 flex items-center gap-1">
-                <span className="inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-xs">
-                  <ProjectIcon project={activeProject} size="md" />
-                  <span className="truncate max-w-40">{activeProject.title}</span>
-                </span>
-                <button
-                  type="button"
-                  className="rounded-sm p-0.5 text-muted-foreground hover:text-foreground hover:bg-accent transition-colors cursor-pointer"
-                  onClick={() => setSelectedProjectId(null)}
-                >
-                  <X className="size-3" />
-                </button>
-              </div>
-            )}
-            <ContextAnchorCard />
-          </>
+          <ContextAnchorCard />
         }
         leftAdornment={
           <div className="flex items-center gap-0.5">
@@ -760,22 +743,17 @@ function ProjectDropdown({
 
   return (
     <DropdownMenu>
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <DropdownMenuTrigger className="flex items-center gap-1 rounded-md px-1.5 py-1 cursor-pointer outline-none transition-colors hover:bg-accent aria-expanded:bg-accent">
-              {activeProject ? (
-                <ProjectIcon project={activeProject} size="sm" />
-              ) : (
-                <FolderKanban className="size-4 text-muted-foreground" />
-              )}
-            </DropdownMenuTrigger>
-          }
-        />
-        <TooltipContent side="top">
-          {activeProject ? `Project: ${activeProject.title}` : "Select project"}
-        </TooltipContent>
-      </Tooltip>
+      <DropdownMenuTrigger className="flex items-center gap-1.5 rounded-md px-1.5 py-1 cursor-pointer outline-none transition-colors hover:bg-accent aria-expanded:bg-accent">
+        {activeProject ? (
+          <ProjectIcon project={activeProject} size="sm" />
+        ) : (
+          <FolderKanban className="size-4 text-muted-foreground" />
+        )}
+        <span className={`text-xs font-medium max-w-28 truncate ${activeProject ? "" : "text-muted-foreground"}`}>
+          {activeProject ? activeProject.title : "Project"}
+        </span>
+        <ChevronDown className="size-3 text-muted-foreground shrink-0" />
+      </DropdownMenuTrigger>
       <DropdownMenuContent align="start" side="top" className="max-h-80 w-auto min-w-48 max-w-64">
         <DropdownMenuItem onClick={() => onSelect(null)}>
           <FolderKanban className="size-4 text-muted-foreground" />
