@@ -26,7 +26,6 @@ type ProjectResponse struct {
 	Priority    string  `json:"priority"`
 	LeadType      *string `json:"lead_type"`
 	LeadID        *string `json:"lead_id"`
-	WorkingFolder *string `json:"working_folder"`
 	CreatedAt     string  `json:"created_at"`
 	UpdatedAt     string  `json:"updated_at"`
 	IssueCount    int64   `json:"issue_count"`
@@ -44,7 +43,6 @@ func projectToResponse(p db.Project) ProjectResponse {
 		Priority:    p.Priority,
 		LeadType:      textToPtr(p.LeadType),
 		LeadID:        uuidToPtr(p.LeadID),
-		WorkingFolder: textToPtr(p.WorkingFolder),
 		CreatedAt:     timestampToString(p.CreatedAt),
 		UpdatedAt:   timestampToString(p.UpdatedAt),
 	}
@@ -66,7 +64,6 @@ type CreateProjectRequest struct {
 	Priority      string  `json:"priority"`
 	LeadType      *string `json:"lead_type"`
 	LeadID        *string `json:"lead_id"`
-	WorkingFolder *string `json:"working_folder"`
 }
 
 type UpdateProjectRequest struct {
@@ -77,7 +74,6 @@ type UpdateProjectRequest struct {
 	Priority      *string `json:"priority"`
 	LeadType      *string `json:"lead_type"`
 	LeadID        *string `json:"lead_id"`
-	WorkingFolder *string `json:"working_folder"`
 }
 
 func (h *Handler) ListProjects(w http.ResponseWriter, r *http.Request) {
@@ -201,7 +197,6 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 		LeadType:      leadType,
 		LeadID:        leadID,
 		Priority:      priority,
-		WorkingFolder: ptrToText(req.WorkingFolder),
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create project")
@@ -253,7 +248,6 @@ func (h *Handler) UpdateProject(w http.ResponseWriter, r *http.Request) {
 		Icon:          prevProject.Icon,
 		LeadType:      prevProject.LeadType,
 		LeadID:        prevProject.LeadID,
-		WorkingFolder: prevProject.WorkingFolder,
 	}
 	if req.Title != nil {
 		params.Title = pgtype.Text{String: *req.Title, Valid: true}
@@ -294,13 +288,6 @@ func (h *Handler) UpdateProject(w http.ResponseWriter, r *http.Request) {
 			params.LeadID = leadUUID
 		} else {
 			params.LeadID = pgtype.UUID{Valid: false}
-		}
-	}
-	if _, ok := rawFields["working_folder"]; ok {
-		if req.WorkingFolder != nil {
-			params.WorkingFolder = pgtype.Text{String: *req.WorkingFolder, Valid: true}
-		} else {
-			params.WorkingFolder = pgtype.Text{Valid: false}
 		}
 	}
 	project, err := h.Queries.UpdateProject(r.Context(), params)

@@ -41,6 +41,7 @@ type IssueResponse struct {
 	ParentIssueID      *string                 `json:"parent_issue_id"`
 	ProjectID          *string                 `json:"project_id"`
 	Position           float64                 `json:"position"`
+	StartDate          *string                 `json:"start_date"`
 	DueDate            *string                 `json:"due_date"`
 	CreatedAt          string                  `json:"created_at"`
 	UpdatedAt          string                  `json:"updated_at"`
@@ -73,6 +74,7 @@ func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
 		ParentIssueID: uuidToPtr(i.ParentIssueID),
 		ProjectID:     uuidToPtr(i.ProjectID),
 		Position:      i.Position,
+		StartDate:     timestampToPtr(i.StartDate),
 		DueDate:       timestampToPtr(i.DueDate),
 		CreatedAt:     timestampToString(i.CreatedAt),
 		UpdatedAt:     timestampToString(i.UpdatedAt),
@@ -98,6 +100,7 @@ func issueListRowToResponse(i db.ListIssuesRow, issuePrefix string) IssueRespons
 		ParentIssueID: uuidToPtr(i.ParentIssueID),
 		ProjectID:     uuidToPtr(i.ProjectID),
 		Position:      i.Position,
+		StartDate:     timestampToPtr(i.StartDate),
 		DueDate:       timestampToPtr(i.DueDate),
 		CreatedAt:     timestampToString(i.CreatedAt),
 		UpdatedAt:     timestampToString(i.UpdatedAt),
@@ -153,6 +156,7 @@ func openIssueRowToResponse(i db.ListOpenIssuesRow, issuePrefix string) IssueRes
 		ParentIssueID: uuidToPtr(i.ParentIssueID),
 		ProjectID:     uuidToPtr(i.ProjectID),
 		Position:      i.Position,
+		StartDate:     timestampToPtr(i.StartDate),
 		DueDate:       timestampToPtr(i.DueDate),
 		CreatedAt:     timestampToString(i.CreatedAt),
 		UpdatedAt:     timestampToString(i.UpdatedAt),
@@ -1050,6 +1054,7 @@ type CreateIssueRequest struct {
 	AssigneeID         *string  `json:"assignee_id"`
 	ParentIssueID      *string  `json:"parent_issue_id"`
 	ProjectID          *string  `json:"project_id"`
+	StartDate          *string  `json:"start_date"`
 	DueDate            *string  `json:"due_date"`
 	AttachmentIDs      []string `json:"attachment_ids,omitempty"`
 	// OriginType / OriginID stamp the new issue with its provenance so
@@ -1146,6 +1151,16 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var startDate pgtype.Timestamptz
+	if req.StartDate != nil && *req.StartDate != "" {
+		t, err := time.Parse(time.RFC3339, *req.StartDate)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid start_date format, expected RFC3339")
+			return
+		}
+		startDate = pgtype.Timestamptz{Time: t, Valid: true}
+	}
+
 	var dueDate pgtype.Timestamptz
 	if req.DueDate != nil && *req.DueDate != "" {
 		t, err := time.Parse(time.RFC3339, *req.DueDate)
@@ -1216,6 +1231,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 			CreatorID:     parseUUID(actualCreatorID),
 			ParentIssueID: parentIssueID,
 			Position:      0,
+			StartDate:     startDate,
 			DueDate:       dueDate,
 			Number:        issueNumber,
 			ProjectID:     projectID,
@@ -1235,6 +1251,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 			CreatorID:     parseUUID(actualCreatorID),
 			ParentIssueID: parentIssueID,
 			Position:      0,
+			StartDate:     startDate,
 			DueDate:       dueDate,
 			Number:        issueNumber,
 			ProjectID:     projectID,
@@ -1294,6 +1311,7 @@ type UpdateIssueRequest struct {
 	AssigneeType       *string  `json:"assignee_type"`
 	AssigneeID         *string  `json:"assignee_id"`
 	Position           *float64 `json:"position"`
+	StartDate          *string  `json:"start_date"`
 	DueDate            *string  `json:"due_date"`
 	ParentIssueID      *string  `json:"parent_issue_id"`
 	ProjectID          *string  `json:"project_id"`
@@ -1368,6 +1386,18 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 			params.AssigneeID = id
 		} else {
 			params.AssigneeID = pgtype.UUID{Valid: false} // explicit null = unassign
+		}
+	}
+	if _, ok := rawFields["start_date"]; ok {
+		if req.StartDate != nil && *req.StartDate != "" {
+			t, err := time.Parse(time.RFC3339, *req.StartDate)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, "invalid start_date format, expected RFC3339")
+				return
+			}
+			params.StartDate = pgtype.Timestamptz{Time: t, Valid: true}
+		} else {
+			params.StartDate = pgtype.Timestamptz{Valid: false}
 		}
 	}
 	if _, ok := rawFields["due_date"]; ok {
@@ -1950,27 +1980,26 @@ func (h *Handler) BatchDeleteIssues(w http.ResponseWriter, r *http.Request) {
 // ---------------------------------------------------------------------------
 
 func (h *Handler) ListIssueDependencies(w http.ResponseWriter, r *http.Request) {
-	issueID := chi.URLParam(r, "issueId")
-	issueUUID, ok := parseUUIDOrBadRequest(w, issueID, "issue id")
+	// Route is /api/issues/{id}/dependencies — accept both UUID and the
+	// human-readable identifier (e.g. "BIZ-110") via the issue loader.
+	issueID := chi.URLParam(r, "id")
+	issue, ok := h.loadIssueForUser(w, r, issueID)
 	if !ok {
 		return
 	}
 
-	prereqs, err := h.Queries.ListPrerequisites(r.Context(), issueUUID)
+	prereqs, err := h.Queries.ListPrerequisites(r.Context(), issue.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list prerequisites")
 		return
 	}
-	nextIssues, err := h.Queries.ListNextIssues(r.Context(), issueUUID)
+	nextIssues, err := h.Queries.ListNextIssues(r.Context(), issue.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list next issues")
 		return
 	}
 
-	// Get workspace prefix for identifiers
-	workspaceID := ctxWorkspaceID(r.Context())
-	wsUUID, _ := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
-	prefix := h.getIssuePrefix(r.Context(), wsUUID)
+	prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
 
 	type depResponse struct {
 		ID         string `json:"id"`
@@ -2012,8 +2041,10 @@ func (h *Handler) ListIssueDependencies(w http.ResponseWriter, r *http.Request) 
 }
 
 func (h *Handler) CreateIssueDependency(w http.ResponseWriter, r *http.Request) {
-	issueID := chi.URLParam(r, "issueId")
-	issueUUID, ok := parseUUIDOrBadRequest(w, issueID, "issue id")
+	// Route is /api/issues/{id}/dependencies — accept both UUID and the
+	// human-readable identifier (e.g. "BIZ-110") via the issue loader.
+	issueID := chi.URLParam(r, "id")
+	issue, ok := h.loadIssueForUser(w, r, issueID)
 	if !ok {
 		return
 	}
@@ -2027,8 +2058,8 @@ func (h *Handler) CreateIssueDependency(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	targetUUID, ok := parseUUIDOrBadRequest(w, req.TargetIssueID, "target_issue_id")
-	if !ok {
+	if req.TargetIssueID == "" {
+		writeError(w, http.StatusBadRequest, "target_issue_id is required")
 		return
 	}
 
@@ -2037,16 +2068,24 @@ func (h *Handler) CreateIssueDependency(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// Resolve target_issue_id — accept identifier or UUID. loadIssueForUser
+	// scopes the lookup to the request's workspace, so a target outside the
+	// workspace surfaces as 404.
+	targetIssue, ok := h.loadIssueForUser(w, r, req.TargetIssueID)
+	if !ok {
+		return
+	}
+
 	// Determine which is issue_id (next) and depends_on_issue_id (prerequisite)
 	var nextID, prereqID pgtype.UUID
 	if req.Direction == "prerequisite" {
 		// "target is a prerequisite of this issue" → this issue depends on target
-		nextID = issueUUID
-		prereqID = targetUUID
+		nextID = issue.ID
+		prereqID = targetIssue.ID
 	} else {
 		// "target is a next issue of this issue" → target depends on this issue
-		nextID = targetUUID
-		prereqID = issueUUID
+		nextID = targetIssue.ID
+		prereqID = issue.ID
 	}
 
 	// Cycle detection: check if adding this dependency would create a loop.

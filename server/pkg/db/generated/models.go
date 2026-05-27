@@ -280,6 +280,7 @@ type Issue struct {
 	OriginType         pgtype.Text        `json:"origin_type"`
 	OriginID           pgtype.UUID        `json:"origin_id"`
 	FirstExecutedAt    pgtype.Timestamptz `json:"first_executed_at"`
+	StartDate          pgtype.Timestamptz `json:"start_date"`
 }
 
 type IssueDependency struct {
@@ -352,18 +353,17 @@ type PinnedItem struct {
 }
 
 type Project struct {
-	ID            pgtype.UUID        `json:"id"`
-	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
-	Title         string             `json:"title"`
-	Description   pgtype.Text        `json:"description"`
-	Icon          pgtype.Text        `json:"icon"`
-	Status        string             `json:"status"`
-	LeadType      pgtype.Text        `json:"lead_type"`
-	LeadID        pgtype.UUID        `json:"lead_id"`
-	CreatedAt     pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
-	Priority      string             `json:"priority"`
-	WorkingFolder pgtype.Text        `json:"working_folder"`
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Title       string             `json:"title"`
+	Description pgtype.Text        `json:"description"`
+	Icon        pgtype.Text        `json:"icon"`
+	Status      string             `json:"status"`
+	LeadType    pgtype.Text        `json:"lead_type"`
+	LeadID      pgtype.UUID        `json:"lead_id"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	Priority    string             `json:"priority"`
 }
 
 type Skill struct {
@@ -437,17 +437,18 @@ type VerificationCode struct {
 }
 
 type Workspace struct {
-	ID           pgtype.UUID        `json:"id"`
-	Name         string             `json:"name"`
-	Slug         string             `json:"slug"`
-	Description  pgtype.Text        `json:"description"`
-	Settings     []byte             `json:"settings"`
-	CreatedAt    pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
-	Context      pgtype.Text        `json:"context"`
-	Repos        []byte             `json:"repos"`
-	IssuePrefix  string             `json:"issue_prefix"`
-	IssueCounter int32              `json:"issue_counter"`
+	ID            pgtype.UUID        `json:"id"`
+	Name          string             `json:"name"`
+	Slug          string             `json:"slug"`
+	Description   pgtype.Text        `json:"description"`
+	Settings      []byte             `json:"settings"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+	Context       pgtype.Text        `json:"context"`
+	Repos         []byte             `json:"repos"`
+	IssuePrefix   string             `json:"issue_prefix"`
+	IssueCounter  int32              `json:"issue_counter"`
+	WorkingFolder pgtype.Text        `json:"working_folder"`
 }
 
 type WorkspaceInvitation struct {

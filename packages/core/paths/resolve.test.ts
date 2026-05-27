@@ -13,6 +13,7 @@ function makeWs(slug: string): Workspace {
     settings: {},
     repos: [],
     issue_prefix: slug.toUpperCase(),
+    working_folder: null,
     created_at: "",
     updated_at: "",
   };

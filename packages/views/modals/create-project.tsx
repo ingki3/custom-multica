@@ -102,7 +102,6 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
         priority,
         lead_type: leadType,
         lead_id: leadId,
-        working_folder: workingFolder.trim() || undefined,
       });
       onClose();
       toast.success("Project created");

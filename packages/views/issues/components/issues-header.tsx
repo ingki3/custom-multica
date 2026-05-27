@@ -11,6 +11,7 @@ import {
   Filter,
   FolderKanban,
   FolderMinus,
+  GanttChart,
   List,
   SignalHigh,
   SlidersHorizontal,
@@ -804,7 +805,9 @@ export function IssuesHeader({ scopedIssues }: { scopedIssues: Issue[] }) {
                 <TooltipTrigger
                   render={
                     <Button variant="outline" size="icon-sm" className="text-muted-foreground">
-                      {viewMode === "board" ? (
+                      {viewMode === "gantt" ? (
+                        <GanttChart className="size-4" />
+                      ) : viewMode === "board" ? (
                         <Columns3 className="size-4" />
                       ) : (
                         <List className="size-4" />
@@ -815,7 +818,7 @@ export function IssuesHeader({ scopedIssues }: { scopedIssues: Issue[] }) {
               }
             />
             <TooltipContent side="bottom">
-              {viewMode === "board" ? "Board view" : "List view"}
+              {viewMode === "gantt" ? "Gantt view" : viewMode === "board" ? "Board view" : "List view"}
             </TooltipContent>
           </Tooltip>
           <DropdownMenuContent align="end" className="w-auto">
@@ -828,6 +831,10 @@ export function IssuesHeader({ scopedIssues }: { scopedIssues: Issue[] }) {
               <DropdownMenuItem onClick={() => act.setViewMode("list")}>
                 <List />
                 List
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => act.setViewMode("gantt")}>
+                <GanttChart />
+                Gantt
               </DropdownMenuItem>
             </DropdownMenuGroup>
           </DropdownMenuContent>
