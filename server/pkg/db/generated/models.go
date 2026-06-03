@@ -309,6 +309,20 @@ type IssueReaction struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
+type IssueStatusTransition struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	IssueID     pgtype.UUID        `json:"issue_id"`
+	FromStatus  string             `json:"from_status"`
+	ToStatus    string             `json:"to_status"`
+	Source      string             `json:"source"`
+	ActorType   string             `json:"actor_type"`
+	ActorID     pgtype.UUID        `json:"actor_id"`
+	TaskID      pgtype.UUID        `json:"task_id"`
+	Metadata    []byte             `json:"metadata"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
 type IssueSubscriber struct {
 	IssueID   pgtype.UUID        `json:"issue_id"`
 	UserType  string             `json:"user_type"`
@@ -436,6 +450,24 @@ type VerificationCode struct {
 	Attempts  int32              `json:"attempts"`
 }
 
+type WebhookDelivery struct {
+	ID             pgtype.UUID        `json:"id"`
+	WebhookID      pgtype.UUID        `json:"webhook_id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	EventType      string             `json:"event_type"`
+	EventID        pgtype.UUID        `json:"event_id"`
+	Payload        []byte             `json:"payload"`
+	Status         string             `json:"status"`
+	AttemptCount   int32              `json:"attempt_count"`
+	NextAttemptAt  pgtype.Timestamptz `json:"next_attempt_at"`
+	LastAttemptAt  pgtype.Timestamptz `json:"last_attempt_at"`
+	ResponseStatus pgtype.Int4        `json:"response_status"`
+	ResponseBody   pgtype.Text        `json:"response_body"`
+	Error          pgtype.Text        `json:"error"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	DeliveredAt    pgtype.Timestamptz `json:"delivered_at"`
+}
+
 type Workspace struct {
 	ID            pgtype.UUID        `json:"id"`
 	Name          string             `json:"name"`
@@ -473,6 +505,20 @@ type WorkspaceMcpServer struct {
 	Args        []byte             `json:"args"`
 	Url         pgtype.Text        `json:"url"`
 	Env         []byte             `json:"env"`
+	CreatedBy   pgtype.UUID        `json:"created_by"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+type WorkspaceWebhook struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Name        string             `json:"name"`
+	Url         string             `json:"url"`
+	Secret      string             `json:"secret"`
+	Enabled     bool               `json:"enabled"`
+	Events      []byte             `json:"events"`
+	Filters     []byte             `json:"filters"`
 	CreatedBy   pgtype.UUID        `json:"created_by"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`

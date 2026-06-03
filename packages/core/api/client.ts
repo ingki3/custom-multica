@@ -81,6 +81,10 @@ import type {
   CreateMcpServerRequest,
   UpdateMcpServerRequest,
   AgentMcpServerEntry,
+  WorkspaceWebhook,
+  WebhookDelivery,
+  CreateWebhookRequest,
+  UpdateWebhookRequest,
 } from "../types";
 import type { OnboardingCompletionPath } from "../onboarding/types";
 import { type Logger, noopLogger } from "../logger";
@@ -1131,6 +1135,45 @@ export class ApiClient {
       method: "PUT",
       body: JSON.stringify(data),
     });
+  }
+
+  // Workspace Webhooks
+  async listWebhooks(): Promise<WorkspaceWebhook[]> {
+    return this.fetch("/api/webhooks");
+  }
+
+  async createWebhook(data: CreateWebhookRequest): Promise<WorkspaceWebhook> {
+    return this.fetch("/api/webhooks", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateWebhook(id: string, data: UpdateWebhookRequest): Promise<WorkspaceWebhook> {
+    return this.fetch(`/api/webhooks/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteWebhook(id: string): Promise<void> {
+    await this.fetch(`/api/webhooks/${id}`, { method: "DELETE" });
+  }
+
+  async rotateWebhookSecret(id: string): Promise<WorkspaceWebhook> {
+    return this.fetch(`/api/webhooks/${id}/rotate-secret`, { method: "POST" });
+  }
+
+  async testWebhook(id: string): Promise<WebhookDelivery> {
+    return this.fetch(`/api/webhooks/${id}/test`, { method: "POST" });
+  }
+
+  async listWebhookDeliveries(id: string): Promise<WebhookDelivery[]> {
+    return this.fetch(`/api/webhooks/${id}/deliveries`);
+  }
+
+  async retryWebhookDelivery(id: string): Promise<WebhookDelivery> {
+    return this.fetch(`/api/webhook-deliveries/${id}/retry`, { method: "POST" });
   }
 
   // Labels

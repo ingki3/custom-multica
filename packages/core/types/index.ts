@@ -67,3 +67,4 @@ export type {
   ListAutopilotRunsResponse,
 } from "./autopilot";
 export type { McpServer, CreateMcpServerRequest, UpdateMcpServerRequest, AgentMcpServerEntry } from "./mcp";
+export type { WorkspaceWebhook, WebhookDelivery, WebhookEvent, WebhookFilters, CreateWebhookRequest, UpdateWebhookRequest } from "./webhook";

@@ -23,11 +23,12 @@ import (
 )
 
 type TaskService struct {
-	Queries   *db.Queries
-	TxStarter TxStarter
-	Hub       *realtime.Hub
-	Bus       *events.Bus
-	Wakeup    TaskWakeupNotifier
+	Queries        *db.Queries
+	TxStarter      TxStarter
+	Hub            *realtime.Hub
+	Bus            *events.Bus
+	Wakeup         TaskWakeupNotifier
+	WebhookService *WebhookService
 }
 
 type TaskWakeupNotifier interface {
@@ -538,12 +539,14 @@ func (s *TaskService) StartTask(ctx context.Context, taskID pgtype.UUID) (*db.Ag
 	if task.IssueID.Valid {
 		if issue, err := s.Queries.GetIssue(ctx, task.IssueID); err == nil {
 			if issue.Status == "todo" {
-				if updated, err := s.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
-					ID:     task.IssueID,
-					Status: "in_progress",
-				}); err != nil {
+				updated, changed, err := s.transitionIssueStatus(ctx, task.IssueID, "in_progress", StatusTransitionOptions{
+					Source: "task_started",
+					Actor:  StatusTransitionActor{Type: "system"},
+					TaskID: task.ID,
+				})
+				if err != nil {
 					slog.Warn("auto-transition to in_progress failed", "issue_id", util.UUIDToString(task.IssueID), "error", err)
-				} else {
+				} else if changed {
 					slog.Info("auto-transitioned issue to in_progress", "issue_id", util.UUIDToString(task.IssueID))
 					s.broadcastIssueUpdated(updated)
 				}
@@ -697,12 +700,14 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 	if task.IssueID.Valid {
 		if issue, err := s.Queries.GetIssue(ctx, task.IssueID); err == nil {
 			if issue.Status == "in_progress" {
-				if updated, err := s.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
-					ID:     task.IssueID,
-					Status: "in_review",
-				}); err != nil {
+				updated, changed, err := s.transitionIssueStatus(ctx, task.IssueID, "in_review", StatusTransitionOptions{
+					Source: "task_completed",
+					Actor:  StatusTransitionActor{Type: "system"},
+					TaskID: task.ID,
+				})
+				if err != nil {
 					slog.Warn("auto-transition to in_review failed", "issue_id", util.UUIDToString(task.IssueID), "error", err)
-				} else {
+				} else if changed {
 					slog.Info("auto-transitioned issue to in_review", "issue_id", util.UUIDToString(task.IssueID))
 					s.broadcastIssueUpdated(updated)
 				}
@@ -738,16 +743,21 @@ func (s *TaskService) ActivateNextIssues(ctx context.Context, issueID pgtype.UUI
 
 	for _, next := range nextIssues {
 		if next.Status == "todo" || next.Status == "backlog" {
-			updated, err := s.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
-				ID:     next.ID,
-				Status: "in_progress",
+			updated, changed, err := s.transitionIssueStatus(ctx, next.ID, "in_progress", StatusTransitionOptions{
+				Source: "dependency_activation",
+				Actor:  StatusTransitionActor{Type: "system"},
+				Metadata: map[string]any{
+					"triggered_by_issue_id": util.UUIDToString(issueID),
+				},
 			})
 			if err != nil {
 				slog.Warn("activate next issue: status update failed", "issue_id", util.UUIDToString(next.ID), "error", err)
 				continue
 			}
 			slog.Info("dependency satisfied: activated next issue", "issue_id", util.UUIDToString(next.ID), "triggered_by", util.UUIDToString(issueID))
-			s.broadcastIssueUpdated(updated)
+			if changed {
+				s.broadcastIssueUpdated(updated)
+			}
 
 			// Enqueue task if the issue has an agent assignee
 			if next.AssigneeType.String == "agent" && next.AssigneeID.Valid {
@@ -1050,9 +1060,10 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 							"error", checkErr,
 						)
 					} else if !hasActive {
-						if _, updateErr := s.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
-							ID:     t.IssueID,
-							Status: "todo",
+						if _, _, updateErr := s.transitionIssueStatus(ctx, t.IssueID, "todo", StatusTransitionOptions{
+							Source: "task_failed",
+							Actor:  StatusTransitionActor{Type: "system"},
+							TaskID: t.ID,
 						}); updateErr != nil {
 							slog.Warn("handle failed tasks: reset stuck issue failed",
 								"issue_id", issueKey,
@@ -1281,6 +1292,21 @@ func (s *TaskService) broadcastTaskEvent(ctx context.Context, eventType string, 
 		ActorID:     "",
 		Payload:     payload,
 	})
+}
+
+func (s *TaskService) transitionIssueStatus(ctx context.Context, issueID pgtype.UUID, toStatus string, opts StatusTransitionOptions) (db.Issue, bool, error) {
+	if s.WebhookService != nil {
+		return s.WebhookService.TransitionIssueStatus(ctx, issueID, toStatus, opts)
+	}
+	issue, err := s.Queries.GetIssue(ctx, issueID)
+	if err != nil {
+		return db.Issue{}, false, err
+	}
+	if issue.Status == toStatus {
+		return issue, false, nil
+	}
+	updated, err := s.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{ID: issueID, Status: toStatus})
+	return updated, err == nil, err
 }
 
 // ResolveTaskWorkspaceID determines the workspace ID for a task.
