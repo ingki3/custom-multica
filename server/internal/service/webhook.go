@@ -172,8 +172,9 @@ func (s *WebhookService) BuildStatusChangedPayload(ctx context.Context, tr db.Is
 	issuePath := fmt.Sprintf("/%s/issues/%s", workspaceSlug, identifier)
 
 	payload := map[string]any{
-		"event":    EventIssueStatusChanged,
-		"event_id": util.UUIDToString(tr.ID),
+		"event":      EventIssueStatusChanged,
+		"event_type": EventIssueStatusChanged,
+		"event_id":   util.UUIDToString(tr.ID),
 		"workspace": map[string]any{
 			"id":   util.UUIDToString(tr.WorkspaceID),
 			"slug": workspaceSlug,
@@ -374,12 +375,15 @@ func (s *WebhookService) DispatchDelivery(ctx context.Context, d db.WebhookDeliv
 	}
 	ts := strconv.FormatInt(time.Now().Unix(), 10)
 	sig := signWebhookPayload(wh.Secret, ts, d.Payload)
+	deliveryID := util.UUIDToString(d.ID)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "Multica-Webhooks/1.0")
 	req.Header.Set("X-Multica-Event", d.EventType)
-	req.Header.Set("X-Multica-Delivery", util.UUIDToString(d.ID))
+	req.Header.Set("X-Multica-Delivery", deliveryID)
+	req.Header.Set("X-Request-ID", deliveryID)
 	req.Header.Set("X-Multica-Timestamp", ts)
 	req.Header.Set("X-Multica-Signature", sig)
+	req.Header.Set("X-Webhook-Signature", signGenericWebhookPayload(wh.Secret, d.Payload))
 
 	resp, err := s.Client.Do(req)
 	if err != nil {
@@ -407,6 +411,12 @@ func signWebhookPayload(secret, timestamp string, payload []byte) string {
 	mac.Write([]byte("."))
 	mac.Write(payload)
 	return "sha256=" + hex.EncodeToString(mac.Sum(nil))
+}
+
+func signGenericWebhookPayload(secret string, payload []byte) string {
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write(payload)
+	return hex.EncodeToString(mac.Sum(nil))
 }
 
 func readLimited(r io.Reader, limit int64) string {

@@ -49,3 +49,14 @@ func TestSignWebhookPayload(t *testing.T) {
 		t.Fatalf("signature = %q, want %q", got, want)
 	}
 }
+
+func TestSignGenericWebhookPayload(t *testing.T) {
+	payload := []byte(`{"event":"issue.status_changed"}`)
+	got := signGenericWebhookPayload("secret", payload)
+	mac := hmac.New(sha256.New, []byte("secret"))
+	mac.Write(payload)
+	want := hex.EncodeToString(mac.Sum(nil))
+	if got != want {
+		t.Fatalf("signature = %q, want %q", got, want)
+	}
+}
