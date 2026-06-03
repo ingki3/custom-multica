@@ -3,6 +3,8 @@
 ## Completed
 
 - [x] **Issue 상태 변경 Webhook 지원** — Migration 072로 `issue_status_transition`, `workspace_webhook`, `webhook_delivery` 추가. 모든 issue status 변경을 `from_status` → `to_status` 전환으로 기록하고 `issue.status_changed` 이벤트를 발행하도록 연결. workspace별 webhook CRUD/secret rotate/test/delivery retry API, HMAC 서명, retry dispatcher, 실행 가능한 payload(issue UUID/identifier, workspace slug, task/agent/project context), Settings Webhooks UI, core 타입/API를 추가.
+- [x] **Hermes Generic Webhook 호환성 보강** — `X-Webhook-Signature`를 raw body 기반 HMAC-SHA256 hex로 전송하고, Hermes 이벤트 추출을 위해 payload에 `event_type`을 추가. retry dedupe 호환을 위해 `X-Request-ID`를 `X-Multica-Delivery`와 동일한 delivery id로 전송하도록 수정.
+- [x] **Webhook Test Delivery payload 보정** — Settings Webhooks의 Test Delivery sample payload에도 실제 운영 이벤트와 동일하게 `event_type: issue.status_changed`를 포함하도록 수정하고 회귀 테스트를 추가.
 - [x] **Docker 없이 셀프호스팅 지원** — `ensure-postgres.sh`가 네이티브 PostgreSQL을 우선 감지하도록 수정. `dev.sh`에서 Docker 필수 요구사항 제거. `Makefile`의 `db-up`/`db-down`/`db-reset`이 네이티브 PostgreSQL에서도 동작하도록 수정. `make selfhost-native` / `make selfhost-native-dev` 타겟 추가. `docker compose` vs `docker-compose` 자동 감지. `SELF_HOSTING.md`, `SELF_HOSTING_ADVANCED.md`, `README.md` 문서 업데이트.
 - [x] **install.sh에서 Docker 없이 --with-server 지원** — `check_docker()`를 boolean 반환으로 변경. `check_native_prereqs()` 추가 (Go, Node, pnpm, PostgreSQL 검증). `setup_server_native()` 추가 (네이티브 빌드 및 실행, PID 파일 관리). `run_with_server()`가 Docker/네이티브 자동 분기. `run_stop()`이 PID 파일 기반 네이티브 프로세스 종료 지원.
 - [x] **Bootstrap 토큰 자동 생성** — `MULTICA_BOOTSTRAP_EMAIL` 환경변수 설정 시 서버 시작 시 자동으로 admin 유저 + 1년 만료 PAT 토큰 생성. `server/cmd/server/bootstrap.go` 신규 파일. 토큰은 최초 1회만 생성되고 stderr에 출력. `.env.example`에 문서화.

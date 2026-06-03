@@ -80,6 +80,7 @@ Example payload:
 ```json
 {
   "event": "issue.status_changed",
+  "event_type": "issue.status_changed",
   "event_id": "4ce1e1a8-2f3b-4e27-a0ff-0b3d7db3bb18",
   "workspace": {
     "id": "8f4c2f8e-1d5d-4d19-9d73-4f2e2f2f8b11",
@@ -132,6 +133,7 @@ issue.identifier
 transition.from
 transition.to
 transition.source
+event_type
 task.id
 task.agent_id
 project.id
@@ -176,12 +178,17 @@ Every delivery includes these headers:
 ```text
 X-Multica-Event: issue.status_changed
 X-Multica-Delivery: <delivery_id>
+X-Request-ID: <delivery_id>
 X-Multica-Timestamp: <unix_seconds>
 X-Multica-Signature: sha256=<hmac>
+X-Webhook-Signature: <hmac_hex>
 User-Agent: Multica-Webhooks/1.0
 ```
 
-Signature input:
+`X-Request-ID` mirrors `X-Multica-Delivery` for generic receivers that use
+`X-Request-ID` as their idempotency or dedupe key.
+
+`X-Multica-Signature` includes the timestamp in the signed input:
 
 ```text
 <timestamp>.<raw_request_body>
@@ -191,6 +198,38 @@ Algorithm:
 
 ```text
 HMAC-SHA256(secret, timestamp + "." + raw_body)
+```
+
+`X-Webhook-Signature` is provided for generic webhook adapters, including
+Hermes Generic. It signs only the raw request body and is sent as raw hex
+without a `sha256=` prefix:
+
+```text
+HMAC-SHA256(secret, raw_body)
+```
+
+## Hermes Generic Adapter
+
+Multica is compatible with Hermes Generic webhook subscriptions:
+
+```bash
+hermes webhook subscribe multica-review \
+  --description "Multica task_completed review handoff" \
+  --events issue.status_changed \
+  --prompt "Multica issue {issue.identifier} transitioned {transition.from} -> {transition.to}. Source={transition.source}. Task={task.id}. Assignee={assignee.name}. Payload: {__raw__}" \
+  --deliver telegram
+```
+
+Hermes can identify the event through `payload.event_type`, verify
+`X-Webhook-Signature` as raw HMAC-SHA256 hex, and dedupe retries through
+`X-Request-ID`.
+
+Recommended Multica filters for review handoff:
+
+```text
+From statuses: in_progress
+To statuses: in_review
+Sources: task_completed
 ```
 
 Node.js verification example:

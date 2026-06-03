@@ -358,13 +358,7 @@ func (h *Handler) TestWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 	eventUUID := uuid.Must(uuid.NewRandom()).String()
 	eventID := parseUUID(eventUUID)
-	payload := map[string]any{
-		"event":      service.EventIssueStatusChanged,
-		"event_id":   eventUUID,
-		"workspace":  map[string]any{"id": workspaceID},
-		"issue":      map[string]any{"id": "test", "identifier": "TEST-1", "title": "Test webhook"},
-		"transition": map[string]any{"from": "in_progress", "to": "in_review", "source": "test", "occurred_at": timeNowRFC3339()},
-	}
+	payload := testWebhookPayload(workspaceID, eventUUID)
 	raw, _ := json.Marshal(payload)
 	delivery, err := h.Queries.CreateWebhookDelivery(r.Context(), db.CreateWebhookDeliveryParams{
 		WebhookID: webhook.ID, WorkspaceID: webhook.WorkspaceID, EventType: service.EventIssueStatusChanged,
@@ -378,6 +372,17 @@ func (h *Handler) TestWebhook(w http.ResponseWriter, r *http.Request) {
 		go h.WebhookService.DispatchDelivery(context.Background(), delivery)
 	}
 	writeJSON(w, http.StatusAccepted, webhookDeliveryToResponse(delivery))
+}
+
+func testWebhookPayload(workspaceID, eventID string) map[string]any {
+	return map[string]any{
+		"event":      service.EventIssueStatusChanged,
+		"event_type": service.EventIssueStatusChanged,
+		"event_id":   eventID,
+		"workspace":  map[string]any{"id": workspaceID},
+		"issue":      map[string]any{"id": "test", "identifier": "TEST-1", "title": "Test webhook"},
+		"transition": map[string]any{"from": "in_progress", "to": "in_review", "source": "test", "occurred_at": timeNowRFC3339()},
+	}
 }
 
 func timeNowRFC3339() string {
