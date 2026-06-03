@@ -118,6 +118,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	daemonTokenCache := auth.NewDaemonTokenCache(rdb)
 	h.PATCache = patCache
 	h.DaemonTokenCache = daemonTokenCache
+	if h.WebhookService != nil && pool != nil {
+		h.WebhookService.StartDispatcher(context.Background())
+	}
 
 	// Wire WS heartbeat after stores are finalized so the WS path uses the
 	// same (possibly Redis-backed) stores as the HTTP path.
@@ -422,6 +425,20 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Delete("/", h.DeleteMcpServer)
 				})
 			})
+
+			r.Route("/api/webhooks", func(r chi.Router) {
+				r.Get("/", h.ListWebhooks)
+				r.Post("/", h.CreateWebhook)
+				r.Route("/{id}", func(r chi.Router) {
+					r.Get("/", h.GetWebhook)
+					r.Put("/", h.UpdateWebhook)
+					r.Delete("/", h.DeleteWebhook)
+					r.Get("/deliveries", h.ListWebhookDeliveries)
+					r.Post("/test", h.TestWebhook)
+					r.Post("/rotate-secret", h.RotateWebhookSecret)
+				})
+			})
+			r.Post("/api/webhook-deliveries/{id}/retry", h.RetryWebhookDelivery)
 
 			// Skills
 			r.Route("/api/skills", func(r chi.Router) {

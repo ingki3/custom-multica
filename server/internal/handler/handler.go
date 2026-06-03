@@ -59,6 +59,7 @@ type Handler struct {
 	TaskService           *service.TaskService
 	AutopilotService      *service.AutopilotService
 	EmailService          *service.EmailService
+	WebhookService        *service.WebhookService
 	UpdateStore           *UpdateStore
 	ModelListStore        *ModelListStore
 	LocalSkillListStore   LocalSkillListStore
@@ -87,6 +88,8 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 	}
 
 	taskSvc := service.NewTaskService(queries, txStarter, hub, bus, daemonHub)
+	webhookSvc := service.NewWebhookService(queries, bus)
+	taskSvc.WebhookService = webhookSvc
 	return &Handler{
 		Queries:               queries,
 		DB:                    executor,
@@ -97,6 +100,7 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		TaskService:           taskSvc,
 		AutopilotService:      service.NewAutopilotService(queries, txStarter, bus, taskSvc),
 		EmailService:          emailService,
+		WebhookService:        webhookSvc,
 		UpdateStore:           NewUpdateStore(),
 		ModelListStore:        NewModelListStore(),
 		LocalSkillListStore:   NewInMemoryLocalSkillListStore(),
@@ -204,6 +208,25 @@ func (h *Handler) publishChat(eventType, workspaceID, actorType, actorID, chatSe
 		ChatSessionID: chatSessionID,
 		Payload:       payload,
 	})
+}
+
+func (h *Handler) recordIssueStatusTransition(ctx context.Context, issue db.Issue, fromStatus, source, actorType, actorID string, taskID pgtype.UUID) {
+	if h.WebhookService == nil || fromStatus == issue.Status {
+		return
+	}
+	var actorUUID pgtype.UUID
+	if actorID != "" {
+		if u, err := util.ParseUUID(actorID); err == nil {
+			actorUUID = u
+		}
+	}
+	if err := h.WebhookService.RecordIssueStatusTransition(ctx, issue, fromStatus, service.StatusTransitionOptions{
+		Source: source,
+		Actor:  service.StatusTransitionActor{Type: actorType, ID: actorUUID},
+		TaskID: taskID,
+	}); err != nil {
+		slog.Warn("record issue status transition failed", "issue_id", uuidToString(issue.ID), "error", err)
+	}
 }
 
 func isNotFound(err error) bool {
