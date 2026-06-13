@@ -68,6 +68,9 @@ type Daemon struct {
 	// git-worktree isolation or non-git requeuing.
 	workingFolderMu    sync.Mutex
 	workingFolderTasks map[string]int
+
+	activeEnvRootsMu sync.Mutex
+	activeEnvRoots   map[string]int // env root path -> reference count (handles reuse paths marked twice)
 }
 
 // New creates a new Daemon instance.
@@ -88,6 +91,7 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 		agentVersions:      make(map[string]string),
 		wsHBLastAck:        make(map[string]time.Time),
 		workingFolderTasks: make(map[string]int),
+		activeEnvRoots:     make(map[string]int),
 	}
 }
 
@@ -1025,15 +1029,22 @@ func (d *Daemon) handleTask(ctx context.Context, task Task) {
 		taskLog.Info("picked task", "issue", task.IssueID, "agent", agentName, "provider", provider)
 	}
 
-	if err := d.client.StartTask(ctx, task.ID); err != nil {
-		taskLog.Error("start task failed", "error", err)
-		if failErr := d.client.FailTask(ctx, task.ID, fmt.Sprintf("start task failed: %s", err.Error()), "", "", "agent_error"); failErr != nil {
-			taskLog.Error("fail task after start error", "error", failErr)
-		}
-		return
+	// Hold a process-wide active-root guard for the rest of this task so the GC
+	// loop never sees a window where the env root has neither the in-process
+	// guard nor .gc_meta.json. runTask installs its own ref-counted mark/unmark
+	// internally; this outer guard deliberately extends through result reporting
+	// and execenv.WriteGCMeta below.
+	predictedEnvRoot := execenv.PredictRootDir(d.cfg.WorkspacesRoot, task.WorkspaceID, task.ID)
+	if predictedEnvRoot != "" {
+		d.markActiveEnvRoot(predictedEnvRoot)
+		defer d.unmarkActiveEnvRoot(predictedEnvRoot)
 	}
-
-	_ = d.client.ReportProgress(ctx, task.ID, fmt.Sprintf("Launching %s", provider), 1, 2)
+	if task.PriorWorkDir != "" {
+		if priorRoot := filepath.Dir(task.PriorWorkDir); priorRoot != "" && priorRoot != predictedEnvRoot {
+			d.markActiveEnvRoot(priorRoot)
+			defer d.unmarkActiveEnvRoot(priorRoot)
+		}
+	}
 
 	// Create a cancellable context so we can interrupt the running agent
 	// when the server-side task status changes to 'cancelled'.
@@ -1143,6 +1154,23 @@ func (d *Daemon) handleTask(ctx context.Context, task Task) {
 	}
 }
 
+// gateResumeToReusedWorkdir clears the task's prior session unless the task
+// runs in the exact workdir the session was recorded against, and reports
+// whether that workdir was reused. CLI backends key their session stores to
+// the cwd, so a session id from a different workdir can never resolve.
+func gateResumeToReusedWorkdir(task *Task, envWorkDir string, taskLog *slog.Logger) bool {
+	reused := task.PriorWorkDir != "" && envWorkDir == task.PriorWorkDir
+	if !reused && task.PriorSessionID != "" {
+		taskLog.Info("dropping prior session: workdir not reused, per-cwd session cannot resolve",
+			"session_id", task.PriorSessionID,
+			"prior_workdir", task.PriorWorkDir,
+			"workdir", envWorkDir,
+		)
+		task.PriorSessionID = ""
+	}
+	return reused
+}
+
 func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLog *slog.Logger) (TaskResult, error) {
 	// Refuse to spawn an agent without a workspace. An empty workspace_id
 	// here would make MULTICA_WORKSPACE_ID empty in the agent env, and the
@@ -1173,20 +1201,20 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 	// Repos are passed as metadata only — the agent checks them out on demand
 	// via `multica repo checkout <url>`.
 	taskCtx := execenv.TaskContextForEnv{
-		IssueID:                 task.IssueID,
-		TriggerCommentID:        task.TriggerCommentID,
-		AgentID:                 agentID,
-		AgentName:               agentName,
-		AgentInstructions:       instructions,
-		AgentSkills:             convertSkillsForEnv(skills),
-		Repos:                   convertReposForEnv(task.Repos),
-		ChatSessionID:           task.ChatSessionID,
-		AutopilotRunID:          task.AutopilotRunID,
-		AutopilotID:             task.AutopilotID,
-		AutopilotTitle:          task.AutopilotTitle,
-		AutopilotDescription:    task.AutopilotDescription,
-		AutopilotSource:         task.AutopilotSource,
-		AutopilotTriggerPayload: strings.TrimSpace(string(task.AutopilotTriggerPayload)),
+		IssueID:                          task.IssueID,
+		TriggerCommentID:                 task.TriggerCommentID,
+		AgentID:                          agentID,
+		AgentName:                        agentName,
+		AgentInstructions:                instructions,
+		AgentSkills:                      convertSkillsForEnv(skills),
+		Repos:                            convertReposForEnv(task.Repos),
+		ChatSessionID:                    task.ChatSessionID,
+		AutopilotRunID:                   task.AutopilotRunID,
+		AutopilotID:                      task.AutopilotID,
+		AutopilotTitle:                   task.AutopilotTitle,
+		AutopilotDescription:             task.AutopilotDescription,
+		AutopilotSource:                  task.AutopilotSource,
+		AutopilotTriggerPayload:          strings.TrimSpace(string(task.AutopilotTriggerPayload)),
 		QuickCreatePrompt:                task.QuickCreatePrompt,
 		RequestingUserName:               task.RequestingUserName,
 		RequestingUserProfileDescription: task.RequestingUserProfileDescription,
@@ -1234,6 +1262,34 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 			return TaskResult{}, fmt.Errorf("prepare execution environment: %w", err)
 		}
 	}
+	predictedRoot := execenv.PredictRootDir(d.cfg.WorkspacesRoot, task.WorkspaceID, task.ID)
+	if predictedRoot != "" {
+		d.markActiveEnvRoot(predictedRoot)
+		defer d.unmarkActiveEnvRoot(predictedRoot)
+	}
+	if task.PriorWorkDir != "" {
+		if priorRoot := filepath.Dir(task.PriorWorkDir); priorRoot != "" && priorRoot != predictedRoot {
+			d.markActiveEnvRoot(priorRoot)
+			defer d.unmarkActiveEnvRoot(priorRoot)
+		}
+	}
+	// Mark the actual env root too in case custom/reuse paths diverge from the
+	// predicted isolated root. markActiveEnvRoot is ref-counted, so duplicate
+	// marks are safe and nest correctly with the outer handleTask guard.
+	if env.RootDir != "" {
+		d.markActiveEnvRoot(env.RootDir)
+		defer d.unmarkActiveEnvRoot(env.RootDir)
+	}
+
+	// Now that env.WorkDir is on disk, transition the server-side state machine
+	// to running. Calling StartTask before Prepare/Reuse let consumers observe
+	// status=running before the workdir existed.
+	if err := d.client.StartTask(ctx, task.ID); err != nil {
+		return TaskResult{}, fmt.Errorf("start task failed: %w", err)
+	}
+	_ = d.client.ReportProgress(ctx, task.ID, fmt.Sprintf("Launching %s", provider), 1, 2)
+
+	reused := gateResumeToReusedWorkdir(&task, env.WorkDir, taskLog)
 
 	// Inject runtime-specific config (meta skill) so the agent discovers .agent_context/.
 	// For custom working folders, preserve existing CLAUDE.md/AGENTS.md/GEMINI.md.
@@ -1321,7 +1377,6 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 		return TaskResult{}, fmt.Errorf("create agent backend: %w", err)
 	}
 
-	reused := task.PriorWorkDir != "" && env.WorkDir == task.PriorWorkDir
 	taskLog.Info("starting agent",
 		"provider", provider,
 		"workdir", env.WorkDir,
@@ -1800,4 +1855,38 @@ func defaultArgsForProvider(cfg Config, provider string) []string {
 		return nil
 	}
 	return append([]string(nil), args...)
+}
+
+func (d *Daemon) markActiveEnvRoot(envRoot string) {
+	if envRoot == "" {
+		return
+	}
+	d.activeEnvRootsMu.Lock()
+	defer d.activeEnvRootsMu.Unlock()
+	if d.activeEnvRoots == nil {
+		d.activeEnvRoots = make(map[string]int)
+	}
+	d.activeEnvRoots[envRoot]++
+}
+
+func (d *Daemon) unmarkActiveEnvRoot(envRoot string) {
+	if envRoot == "" {
+		return
+	}
+	d.activeEnvRootsMu.Lock()
+	defer d.activeEnvRootsMu.Unlock()
+	if d.activeEnvRoots[envRoot] <= 1 {
+		delete(d.activeEnvRoots, envRoot)
+		return
+	}
+	d.activeEnvRoots[envRoot]--
+}
+
+func (d *Daemon) isActiveEnvRoot(envRoot string) bool {
+	if envRoot == "" {
+		return false
+	}
+	d.activeEnvRootsMu.Lock()
+	defer d.activeEnvRootsMu.Unlock()
+	return d.activeEnvRoots[envRoot] > 0
 }

@@ -122,6 +122,14 @@ const (
 
 // shouldCleanTaskDir decides whether a task directory should be removed.
 func (d *Daemon) shouldCleanTaskDir(ctx context.Context, taskDir string) gcAction {
+	// A task currently running on this env root must never be reclaimed — not
+	// even on done/cancelled or orphan paths. A follow-up task can reuse a prior
+	// workdir without bumping the parent issue updated_at, so the TTL check alone
+	// is not a reliable in-process activity signal.
+	if d.isActiveEnvRoot(taskDir) {
+		return gcActionSkip
+	}
+
 	meta, err := execenv.ReadGCMeta(taskDir)
 	if err != nil {
 		// No .gc_meta.json — check mtime for orphan cleanup.

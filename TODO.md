@@ -14,6 +14,7 @@
 
 ## Backlog
 
+- [ ] **[Upstream Sync] 안정성 → 데이터 보존 → Cursor managed MCP → workspace repo registry 순차 반영** — 코드 레벨 검토 결과는 `docs/upstream-sync-candidates-2026-06-13.md`에 저장. 1차 안정성 후보 중 daemon workdir provisioning race(`9439a85aa`), stale resume session drop(`8151f60c6`), ACP stale session clear(`6acca84c2`), Codex cached input usage normalization(`5b7eb9ad2`), setup self-host `MULTICA_SERVER_URL` 반영(`42251b42f`)을 `feat/upstream-stability-sync`에서 포팅 완료하고 targeted Go tests 통과. 2차 데이터 보존 후보: attachment `markdown_url` 계열, issue description flush, create/quick-create attachment binding, chat stop/send recovery. 3차 Cursor managed MCP(`f415099c4`). 4차 workspace repo registry CLI/API(`7db3e507d`). broad merge 금지, 기능 단위 수동 포팅 우선.
 - [x] **Working Folder 동시 접근 정책** — 같은 프로젝트에 여러 에이전트가 동시에 할당되면 같은 폴더에서 작업하게 됨. 하이브리드 정책 구현: git 레포인 경우 `.multica_worktrees/{taskID}/`에 per-task worktree 자동 생성으로 격리, non-git 폴더인 경우 태스크를 큐로 되돌려 직렬화. 데몬 내 `workingFolderTasks map[string]int`로 폴더별 활성 태스크 수 추적. `RequeueTask` API 엔드포인트 추가. 단일 태스크 시 기존 동작 변경 없음.
 - [ ] **Working Folder에 생성되는 .agent_context/ 정리** — 에이전트 작업 후 `.agent_context/` 폴더가 사용자 프로젝트에 남음. 자동 정리 정책 또는 `.gitignore` 자동 추가 검토.
 - [ ] **CLI 기반 로그인 (브라우저 없이)** — 터미널에서 이메일 + 인증코드를 직접 입력하여 토큰 발급. 헤드리스 환경 지원.
