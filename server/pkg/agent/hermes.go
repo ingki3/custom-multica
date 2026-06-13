@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os/exec"
@@ -216,6 +217,13 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				b.cfg.Logger.Warn("hermes set_session_model failed", "error", err, "requested_model", opts.Model)
 				finalStatus = "failed"
 				finalError = fmt.Sprintf("hermes could not switch to model %q: %v", opts.Model, err)
+				if opts.ResumeSessionID != "" && isACPSessionNotFound(err) {
+					b.cfg.Logger.Warn("resumed session not found at set_model time; clearing session id so the daemon retries fresh",
+						"backend", "hermes",
+						"session_id", sessionID,
+					)
+					sessionID = ""
+				}
 				resCh <- Result{
 					Status:     finalStatus,
 					Error:      finalError,
@@ -252,6 +260,13 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			} else {
 				finalStatus = "failed"
 				finalError = fmt.Sprintf("hermes session/prompt failed: %v", err)
+				if opts.ResumeSessionID != "" && isACPSessionNotFound(err) {
+					b.cfg.Logger.Warn("resumed session not found at prompt time; clearing session id so the daemon retries fresh",
+						"backend", "hermes",
+						"session_id", sessionID,
+					)
+					sessionID = ""
+				}
 			}
 		} else {
 			// The prompt completed. Check if we got a promptDone result
@@ -517,6 +532,35 @@ func (c *hermesClient) handleAgentRequest(raw map[string]json.RawMessage) {
 	}
 }
 
+// acpRPCError is a JSON-RPC error frame returned by the agent process. It
+// renders exactly like the previous flat fmt.Errorf string but keeps code and
+// message structured so callers can branch on the error class.
+type acpRPCError struct {
+	Method  string
+	Code    int
+	Message string
+	Data    string
+}
+
+func (e *acpRPCError) Error() string {
+	if e.Data != "" {
+		return fmt.Sprintf("%s: %s (code=%d, data=%s)", e.Method, e.Message, e.Code, e.Data)
+	}
+	return fmt.Sprintf("%s: %s (code=%d)", e.Method, e.Message, e.Code)
+}
+
+func isACPSessionNotFound(err error) bool {
+	var rpcErr *acpRPCError
+	if !errors.As(err, &rpcErr) {
+		return false
+	}
+	if rpcErr.Code != -32603 && rpcErr.Code != -32602 {
+		return false
+	}
+	text := strings.ToLower(rpcErr.Message + " " + rpcErr.Data)
+	return strings.Contains(text, "session not found") || strings.Contains(text, "no session found")
+}
+
 func (c *hermesClient) handleResponse(raw map[string]json.RawMessage) {
 	var id int
 	if err := json.Unmarshal(raw["id"], &id); err != nil {
@@ -541,11 +585,21 @@ func (c *hermesClient) handleResponse(raw map[string]json.RawMessage) {
 
 	if errData, hasErr := raw["error"]; hasErr {
 		var rpcErr struct {
-			Code    int    `json:"code"`
-			Message string `json:"message"`
+			Code    int             `json:"code"`
+			Message string          `json:"message"`
+			Data    json.RawMessage `json:"data"`
 		}
 		_ = json.Unmarshal(errData, &rpcErr)
-		pr.ch <- rpcResult{err: fmt.Errorf("%s: %s (code=%d)", pr.method, rpcErr.Message, rpcErr.Code)}
+		detail := ""
+		if len(rpcErr.Data) > 0 && string(rpcErr.Data) != "null" {
+			var detailString string
+			if err := json.Unmarshal(rpcErr.Data, &detailString); err == nil {
+				detail = detailString
+			} else {
+				detail = string(rpcErr.Data)
+			}
+		}
+		pr.ch <- rpcResult{err: &acpRPCError{Method: pr.method, Code: rpcErr.Code, Message: rpcErr.Message, Data: detail}}
 	} else {
 		// If this is a prompt response, extract usage and stop reason.
 		if pr.method == "session/prompt" {

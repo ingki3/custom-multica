@@ -233,6 +233,13 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 				b.cfg.Logger.Warn("kimi set_session_model failed", "error", err, "requested_model", opts.Model)
 				finalStatus = "failed"
 				finalError = fmt.Sprintf("kimi could not switch to model %q: %v", opts.Model, err)
+				if opts.ResumeSessionID != "" && isACPSessionNotFound(err) {
+					b.cfg.Logger.Warn("resumed session not found at set_model time; clearing session id so the daemon retries fresh",
+						"backend", "kimi",
+						"session_id", sessionID,
+					)
+					sessionID = ""
+				}
 				resCh <- Result{
 					Status:     finalStatus,
 					Error:      finalError,
@@ -267,6 +274,13 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 			} else {
 				finalStatus = "failed"
 				finalError = fmt.Sprintf("kimi session/prompt failed: %v", err)
+				if opts.ResumeSessionID != "" && isACPSessionNotFound(err) {
+					b.cfg.Logger.Warn("resumed session not found at prompt time; clearing session id so the daemon retries fresh",
+						"backend", "kimi",
+						"session_id", sessionID,
+					)
+					sessionID = ""
+				}
 			}
 		} else {
 			select {

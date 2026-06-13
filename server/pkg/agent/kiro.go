@@ -214,6 +214,13 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 				b.cfg.Logger.Warn("kiro set_session_model failed", "error", err, "requested_model", opts.Model)
 				finalStatus = "failed"
 				finalError = fmt.Sprintf("kiro could not switch to model %q: %v", opts.Model, err)
+				if opts.ResumeSessionID != "" && isACPSessionNotFound(err) {
+					b.cfg.Logger.Warn("resumed session not found at set_model time; clearing session id so the daemon retries fresh",
+						"backend", "kiro",
+						"session_id", sessionID,
+					)
+					sessionID = ""
+				}
 				resCh <- Result{
 					Status:     finalStatus,
 					Error:      finalError,
@@ -253,6 +260,13 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 			} else {
 				finalStatus = "failed"
 				finalError = fmt.Sprintf("kiro session/prompt failed: %v", err)
+				if opts.ResumeSessionID != "" && isACPSessionNotFound(err) {
+					b.cfg.Logger.Warn("resumed session not found at prompt time; clearing session id so the daemon retries fresh",
+						"backend", "kiro",
+						"session_id", sessionID,
+					)
+					sessionID = ""
+				}
 			}
 		} else {
 			select {
