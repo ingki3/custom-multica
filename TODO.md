@@ -2,6 +2,7 @@
 
 ## Completed
 
+- [x] **Multica CLI Manual 문서화** — `docs/cli-manual.md` 신규 작성. setup/auth/workspace/project/issue/daemon/runtime 흐름, `--requires`/`--then-runs`, `multica issue dependency` 하위 명령, 출력 형식, 로컬 설치/문서 유지보수 절차를 정리.
 - [x] **Multica CLI issue dependency subcommand** — `multica issue dependency` 하위에 `list`, `add --direction prerequisite|next`, `requires`, `then-runs`, `remove/delete/rm` 명령을 추가. 기존 `issue create/update --requires/--then-runs`와 동일한 `/api/issues/{id}/dependencies` API를 사용하고, table/json 출력 및 도움말/회귀 테스트를 추가. 로컬 설치 CLI도 새 바이너리로 교체하여 즉시 사용 가능하게 배포.
 - [x] **Issue 상태 변경 Webhook 지원** — Migration 072로 `issue_status_transition`, `workspace_webhook`, `webhook_delivery` 추가. 모든 issue status 변경을 `from_status` → `to_status` 전환으로 기록하고 `issue.status_changed` 이벤트를 발행하도록 연결. workspace별 webhook CRUD/secret rotate/test/delivery retry API, HMAC 서명, retry dispatcher, 실행 가능한 payload(issue UUID/identifier, workspace slug, task/agent/project context), Settings Webhooks UI, core 타입/API를 추가.
 - [x] **Hermes Generic Webhook 호환성 보강** — `X-Webhook-Signature`를 raw body 기반 HMAC-SHA256 hex로 전송하고, Hermes 이벤트 추출을 위해 payload에 `event_type`을 추가. retry dedupe 호환을 위해 `X-Request-ID`를 `X-Multica-Delivery`와 동일한 delivery id로 전송하도록 수정.
