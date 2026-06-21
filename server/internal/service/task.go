@@ -300,6 +300,9 @@ func (s *TaskService) CancelTasksForIssue(ctx context.Context, issueID pgtype.UU
 		return err
 	}
 	for _, t := range cancelled {
+		if err := s.Queries.DeleteTaskTokensByTask(ctx, t.ID); err != nil {
+			slog.Warn("delete task tokens after issue cancel failed", "task_id", util.UUIDToString(t.ID), "error", err)
+		}
 		s.ReconcileAgentStatus(ctx, t.AgentID)
 		s.broadcastTaskEvent(ctx, protocol.EventTaskCancelled, t)
 	}
@@ -318,6 +321,9 @@ func (s *TaskService) CancelTasksForAgent(ctx context.Context, agentID pgtype.UU
 		return nil, err
 	}
 	for _, t := range cancelled {
+		if err := s.Queries.DeleteTaskTokensByTask(ctx, t.ID); err != nil {
+			slog.Warn("delete task tokens after agent cancel failed", "task_id", util.UUIDToString(t.ID), "error", err)
+		}
 		s.broadcastTaskEvent(ctx, protocol.EventTaskCancelled, t)
 	}
 	// Reconcile once after the loop — agent transitions from
@@ -339,6 +345,9 @@ func (s *TaskService) CancelTasksByTriggerComment(ctx context.Context, commentID
 		return err
 	}
 	for _, t := range cancelled {
+		if err := s.Queries.DeleteTaskTokensByTask(ctx, t.ID); err != nil {
+			slog.Warn("delete task tokens after trigger cancel failed", "task_id", util.UUIDToString(t.ID), "error", err)
+		}
 		s.ReconcileAgentStatus(ctx, t.AgentID)
 		s.broadcastTaskEvent(ctx, protocol.EventTaskCancelled, t)
 	}
@@ -358,6 +367,9 @@ func (s *TaskService) CancelTask(ctx context.Context, taskID pgtype.UUID) (*db.A
 	}
 	if err != nil {
 		return nil, fmt.Errorf("cancel task: %w", err)
+	}
+	if err := s.Queries.DeleteTaskTokensByTask(ctx, taskID); err != nil {
+		slog.Warn("delete task tokens after cancel failed", "task_id", util.UUIDToString(taskID), "error", err)
 	}
 
 	slog.Info("task cancelled", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(task.IssueID))
@@ -591,6 +603,9 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 				return fmt.Errorf("update chat session resume pointer: %w", err)
 			}
 		}
+		if err := qtx.DeleteTaskTokensByTask(ctx, taskID); err != nil {
+			return fmt.Errorf("delete task tokens: %w", err)
+		}
 		return nil
 	}); err != nil {
 		// When parallel agents race, a task may already be completed,
@@ -803,6 +818,9 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 			}); err != nil {
 				return fmt.Errorf("update chat session resume pointer: %w", err)
 			}
+		}
+		if err := qtx.DeleteTaskTokensByTask(ctx, taskID); err != nil {
+			return fmt.Errorf("delete task tokens: %w", err)
 		}
 		return nil
 	}); err != nil {

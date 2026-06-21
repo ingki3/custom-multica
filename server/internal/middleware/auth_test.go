@@ -10,6 +10,7 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/multica-ai/multica/server/internal/auth"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -263,5 +264,82 @@ func TestAuth_PATCacheHit(t *testing.T) {
 	}
 	if gotUserID != "cached-user-id" {
 		t.Fatalf("expected cached X-User-ID, got %q", gotUserID)
+	}
+}
+
+func TestAuth_TaskToken(t *testing.T) {
+	pool := openPool(t)
+	defer pool.Close()
+	queries := db.New(pool)
+	ctx := context.Background()
+
+	stamp := time.Now().UnixNano()
+	email := "task-token-auth-test@example.com"
+	slug := "task-token-auth-test"
+	_, _ = pool.Exec(ctx, `DELETE FROM workspace WHERE slug = $1`, slug)
+	_, _ = pool.Exec(ctx, `DELETE FROM "user" WHERE email = $1`, email)
+	defer pool.Exec(context.Background(), `DELETE FROM workspace WHERE slug = $1`, slug)
+	defer pool.Exec(context.Background(), `DELETE FROM "user" WHERE email = $1`, email)
+
+	var userID, workspaceID, runtimeID, agentID, taskID string
+	if err := pool.QueryRow(ctx, `INSERT INTO "user" (name, email) VALUES ($1, $2) RETURNING id`, "Task Token Auth", email).Scan(&userID); err != nil {
+		t.Fatalf("insert user: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `INSERT INTO workspace (name, slug, description, issue_prefix) VALUES ($1, $2, '', 'TTA') RETURNING id`, "Task Token Auth", slug).Scan(&workspaceID); err != nil {
+		t.Fatalf("insert workspace: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'owner')`, workspaceID, userID); err != nil {
+		t.Fatalf("insert member: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO agent_runtime (workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, owner_id)
+		VALUES ($1, NULL, $2, 'local', 'test', 'online', '', '{}'::jsonb, now(), $3)
+		RETURNING id
+	`, workspaceID, "Task Token Auth Runtime", userID).Scan(&runtimeID); err != nil {
+		t.Fatalf("insert runtime: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO agent (workspace_id, name, description, runtime_mode, runtime_config, runtime_id, visibility, max_concurrent_tasks, owner_id)
+		VALUES ($1, $2, '', 'local', '{}'::jsonb, $3, 'workspace', 1, $4)
+		RETURNING id
+	`, workspaceID, "Task Token Auth Agent", runtimeID, userID).Scan(&agentID); err != nil {
+		t.Fatalf("insert agent: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, status, priority)
+		VALUES ($1, $2, 'running', 1)
+		RETURNING id
+	`, agentID, runtimeID).Scan(&taskID); err != nil {
+		t.Fatalf("insert task: %v", err)
+	}
+
+	rawToken := "mat_auth_test_token_" + time.Unix(0, stamp).Format("150405.000000000")
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO task_token (token_hash, task_id, agent_id, workspace_id, user_id, expires_at)
+		VALUES ($1, $2, $3, $4, $5, now() + interval '1 hour')
+	`, auth.HashToken(rawToken), taskID, agentID, workspaceID, userID); err != nil {
+		t.Fatalf("insert task token: %v", err)
+	}
+
+	var gotUserID, gotAgentID, gotTaskID, gotWorkspaceID, gotActorType string
+	handler := Auth(queries, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotUserID = r.Header.Get("X-User-ID")
+		gotAgentID = r.Header.Get("X-Agent-ID")
+		gotTaskID = r.Header.Get("X-Task-ID")
+		gotWorkspaceID = r.Header.Get("X-Workspace-ID")
+		gotActorType = r.Header.Get("X-Actor-Type")
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest("GET", "/api/me", nil)
+	req.Header.Set("Authorization", "Bearer "+rawToken)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if gotUserID != userID || gotAgentID != agentID || gotTaskID != taskID || gotWorkspaceID != workspaceID || gotActorType != "agent" {
+		t.Fatalf("unexpected headers user=%q agent=%q task=%q workspace=%q actor=%q", gotUserID, gotAgentID, gotTaskID, gotWorkspaceID, gotActorType)
 	}
 }

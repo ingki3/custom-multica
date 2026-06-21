@@ -17,6 +17,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
+	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/service"
@@ -1055,6 +1056,35 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		}
 		writeError(w, http.StatusInternalServerError, "task workspace isolation check failed")
 		return
+	}
+
+	// Mint a task-scoped `mat_` token bound to (agent, task, workspace, owner).
+	// The daemon injects this as MULTICA_TOKEN into the spawned agent process
+	// instead of exposing its own owner-level credential.
+	if runtime.OwnerID.Valid {
+		tokenStr, terr := auth.GenerateAgentTaskToken()
+		if terr != nil {
+			outcome = "error_token"
+			slog.Error("task claim: failed to generate agent task token",
+				"task_id", uuidToString(task.ID), "error", terr)
+			writeError(w, http.StatusInternalServerError, "failed to mint task token")
+			return
+		}
+		if _, terr := h.Queries.CreateTaskToken(r.Context(), db.CreateTaskTokenParams{
+			TokenHash:   auth.HashToken(tokenStr),
+			TaskID:      task.ID,
+			AgentID:     task.AgentID,
+			WorkspaceID: parseUUID(resp.WorkspaceID),
+			UserID:      runtime.OwnerID,
+			ExpiresAt:   pgtype.Timestamptz{Time: time.Now().Add(24 * time.Hour), Valid: true},
+		}); terr != nil {
+			outcome = "error_token"
+			slog.Error("task claim: failed to persist agent task token",
+				"task_id", uuidToString(task.ID), "error", terr)
+			writeError(w, http.StatusInternalServerError, "failed to persist task token")
+			return
+		}
+		resp.AuthToken = tokenStr
 	}
 
 	slog.Info("task claimed by runtime", "task_id", uuidToString(task.ID), "runtime_id", runtimeID, "agent_id", uuidToString(task.AgentID), "prior_session", resp.PriorSessionID)

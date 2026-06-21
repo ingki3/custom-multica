@@ -15,6 +15,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/multica-ai/multica/server/internal/analytics"
+	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/service"
@@ -111,11 +112,11 @@ func setupHandlerTestFixture(ctx context.Context, pool *pgxpool.Pool) (string, s
 	var runtimeID string
 	if err := pool.QueryRow(ctx, `
 		INSERT INTO agent_runtime (
-			workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at
+			workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, owner_id
 		)
-		VALUES ($1, NULL, $2, 'cloud', $3, 'online', $4, '{}'::jsonb, now())
+		VALUES ($1, NULL, $2, 'cloud', $3, 'online', $4, '{}'::jsonb, now(), $5)
 		RETURNING id
-	`, workspaceID, "Handler Test Runtime", "handler_test_runtime", "Handler test runtime").Scan(&runtimeID); err != nil {
+	`, workspaceID, "Handler Test Runtime", "handler_test_runtime", "Handler test runtime", userID).Scan(&runtimeID); err != nil {
 		return "", "", err
 	}
 	testRuntimeID = runtimeID
@@ -207,6 +208,49 @@ func fetchAgentMcpConfig(t *testing.T, agentID string) []byte {
 	}
 
 	return mcpConfig
+}
+
+func TestClaimTaskByRuntimeIncludesTaskScopedAuthToken(t *testing.T) {
+	agentID := createHandlerTestAgent(t, "Handler Test Task Token Agent", nil)
+
+	task, err := testHandler.TaskService.EnqueueQuickCreateTask(
+		context.Background(),
+		parseUUID(testWorkspaceID),
+		parseUUID(testUserID),
+		parseUUID(agentID),
+		"create an issue from a quick prompt",
+	)
+	if err != nil {
+		t.Fatalf("enqueue quick-create task: %v", err)
+	}
+
+	req := withURLParam(newRequest(http.MethodPost, "/api/daemon/runtimes/"+testRuntimeID+"/tasks/claim", nil), "runtimeId", testRuntimeID)
+	w := httptest.NewRecorder()
+	testHandler.ClaimTaskByRuntime(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ClaimTaskByRuntime status = %d, body = %s", w.Code, w.Body.String())
+	}
+
+	var body struct {
+		Task AgentTaskResponse `json:"task"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode claim response: %v", err)
+	}
+	if body.Task.ID != uuidToString(task.ID) {
+		t.Fatalf("claimed task id = %q, want %q", body.Task.ID, uuidToString(task.ID))
+	}
+	if !strings.HasPrefix(body.Task.AuthToken, "mat_") {
+		t.Fatalf("claim auth_token = %q, want mat_ prefix", body.Task.AuthToken)
+	}
+
+	row, err := testHandler.Queries.GetTaskTokenByHash(context.Background(), auth.HashToken(body.Task.AuthToken))
+	if err != nil {
+		t.Fatalf("load persisted task token: %v", err)
+	}
+	if uuidToString(row.TaskID) != body.Task.ID {
+		t.Fatalf("persisted token task_id = %q, want %q", uuidToString(row.TaskID), body.Task.ID)
+	}
 }
 
 func assertJSONEqual(t *testing.T, got []byte, want string) {
