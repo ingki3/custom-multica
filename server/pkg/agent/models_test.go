@@ -93,6 +93,38 @@ func TestListModelsKiroWithoutBinary(t *testing.T) {
 	}
 }
 
+func TestListModelsAgyWithoutBinary(t *testing.T) {
+	ctx := context.Background()
+	modelCacheMu.Lock()
+	delete(modelCache, "agy")
+	modelCacheMu.Unlock()
+
+	got, err := ListModels(ctx, "agy", "/nonexistent/agy")
+	if err != nil {
+		t.Fatalf("ListModels(agy) error: %v", err)
+	}
+	if got == nil {
+		t.Error("expected non-nil slice even when binary is missing")
+	}
+}
+
+func TestParseAgyModels(t *testing.T) {
+	input := `Gemini 3.5 Flash (Medium)
+Claude Sonnet 4.6 (Thinking)
+Gemini 3.5 Flash (Medium)
+`
+	models := parseAgyModels(input)
+	if len(models) != 2 {
+		t.Fatalf("expected 2 models, got %d: %+v", len(models), models)
+	}
+	if models[0].ID != "Gemini 3.5 Flash (Medium)" || models[0].Provider != "google" || !models[0].Default {
+		t.Errorf("unexpected first model: %+v", models[0])
+	}
+	if models[1].ID != "Claude Sonnet 4.6 (Thinking)" || models[1].Provider != "anthropic" || models[1].Default {
+		t.Errorf("unexpected second model: %+v", models[1])
+	}
+}
+
 func TestListModelsUnknownProvider(t *testing.T) {
 	ctx := context.Background()
 	_, err := ListModels(ctx, "nonexistent", "")

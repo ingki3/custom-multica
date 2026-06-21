@@ -48,7 +48,7 @@ const modelCacheTTL = 60 * time.Second
 // ListModels returns the models supported by the given agent provider.
 // For providers with a known static catalog it returns the baked-in
 // list; for providers with a CLI discovery mechanism (opencode, pi,
-// openclaw) it shells out with caching and falls back to the static
+// openclaw, agy) it shells out with caching and falls back to the static
 // list on failure.
 //
 // executablePath lets the caller point at a non-default binary; pass
@@ -78,6 +78,10 @@ func ListModels(ctx context.Context, providerType, executablePath string) ([]Mod
 	case "kiro":
 		return cachedDiscovery(providerType, func() ([]Model, error) {
 			return discoverKiroModels(ctx, executablePath)
+		})
+	case "agy":
+		return cachedDiscovery(providerType, func() ([]Model, error) {
+			return discoverAgyModels(ctx, executablePath)
 		})
 	case "opencode":
 		return cachedDiscovery(providerType, func() ([]Model, error) {
@@ -656,6 +660,64 @@ func parseCursorModels(output string) []Model {
 		})
 	}
 	return models
+}
+
+// discoverAgyModels shells out to `agy models`, whose output is one display
+// name per line (for example "Gemini 3.5 Flash (Medium)"). The CLI accepts
+// the same display name via --model, so IDs intentionally preserve spaces and
+// punctuation instead of normalizing them.
+func discoverAgyModels(ctx context.Context, executablePath string) ([]Model, error) {
+	if executablePath == "" {
+		executablePath = "agy"
+	}
+	if _, err := exec.LookPath(executablePath); err != nil {
+		return []Model{}, nil
+	}
+	runCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(runCtx, executablePath, "models")
+	hideAgentWindow(cmd)
+	out, err := cmd.Output()
+	if err != nil {
+		return []Model{}, nil
+	}
+	return parseAgyModels(string(out)), nil
+}
+
+func parseAgyModels(output string) []Model {
+	scanner := bufio.NewScanner(strings.NewReader(output))
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	var models []Model
+	seen := map[string]bool{}
+	for scanner.Scan() {
+		id := strings.TrimSpace(scanner.Text())
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		models = append(models, Model{
+			ID:       id,
+			Label:    id,
+			Provider: agyModelProvider(id),
+			Default:  len(models) == 0,
+		})
+	}
+	return models
+}
+
+func agyModelProvider(id string) string {
+	lower := strings.ToLower(id)
+	switch {
+	case strings.Contains(lower, "gemini"):
+		return "google"
+	case strings.Contains(lower, "claude"):
+		return "anthropic"
+	case strings.Contains(lower, "gpt"):
+		return "openai"
+	default:
+		return "antigravity"
+	}
 }
 
 // discoverOpenclawAgents enumerates the pre-registered OpenClaw
