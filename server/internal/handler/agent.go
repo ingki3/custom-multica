@@ -121,45 +121,49 @@ type RepoData struct {
 }
 
 type AgentTaskResponse struct {
-	ID                      string          `json:"id"`
-	AgentID                 string          `json:"agent_id"`
-	RuntimeID               string          `json:"runtime_id"`
-	IssueID                 string          `json:"issue_id"`
-	WorkspaceID             string          `json:"workspace_id"`
-	Status                  string          `json:"status"`
-	Priority                int32           `json:"priority"`
-	DispatchedAt            *string         `json:"dispatched_at"`
-	StartedAt               *string         `json:"started_at"`
-	CompletedAt             *string         `json:"completed_at"`
-	Result                  any             `json:"result"`
-	Error                   *string         `json:"error"`
-	FailureReason           string          `json:"failure_reason,omitempty"` // see TaskService.MaybeRetryFailedTask
-	Attempt                 int32           `json:"attempt"`
-	MaxAttempts             int32           `json:"max_attempts"`
-	ParentTaskID            *string         `json:"parent_task_id,omitempty"`
-	Agent                   *TaskAgentData  `json:"agent,omitempty"`
-	Repos                   []RepoData      `json:"repos,omitempty"`
-	CreatedAt               string          `json:"created_at"`
-	PriorSessionID          string          `json:"prior_session_id,omitempty"`          // session ID from a previous task on same issue
-	PriorWorkDir            string          `json:"prior_work_dir,omitempty"`            // work_dir from a previous task on same issue
-	TriggerCommentID        *string         `json:"trigger_comment_id,omitempty"`        // comment that triggered this task
-	TriggerCommentContent   string          `json:"trigger_comment_content,omitempty"`   // content of the triggering comment
-	TriggerSummary          *string         `json:"trigger_summary,omitempty"`           // canonical short description snapshot — comment text / autopilot title — taken at task creation; survives source edits/deletes
-	TriggerAuthorType       string          `json:"trigger_author_type,omitempty"`       // "agent" or "member" — author kind of the triggering comment
-	TriggerAuthorName       string          `json:"trigger_author_name,omitempty"`       // display name of the triggering comment author
-	ChatSessionID           string          `json:"chat_session_id,omitempty"`           // non-empty for chat tasks
-	ChatMessage             string          `json:"chat_message,omitempty"`              // user message for chat tasks
-	AutopilotRunID          string          `json:"autopilot_run_id,omitempty"`          // non-empty for autopilot-spawned tasks
-	AutopilotID             string          `json:"autopilot_id,omitempty"`              // autopilot that spawned this task
-	AutopilotTitle          string          `json:"autopilot_title,omitempty"`           // autopilot title used as task context
-	AutopilotDescription    string          `json:"autopilot_description,omitempty"`     // autopilot description used as task prompt
-	AutopilotSource         string          `json:"autopilot_source,omitempty"`          // manual, schedule, webhook, or api
-	AutopilotTriggerPayload json.RawMessage `json:"autopilot_trigger_payload,omitempty"` // optional trigger payload for webhook/api runs
-	QuickCreatePrompt       string          `json:"quick_create_prompt,omitempty"`       // user's natural-language input for quick-create tasks
-	WorkingFolder                    string          `json:"working_folder,omitempty"`                    // project-level local folder override for agent workdir
-	Kind                             string          `json:"kind"`                                        // discriminator: "comment" | "autopilot" | "chat" | "quick_create" | "direct" — used by the activity row to label tasks that have no linked issue
-	RequestingUserName               string          `json:"requesting_user_name,omitempty"`               // runtime owner display name for agent brief
+	ID                               string          `json:"id"`
+	AgentID                          string          `json:"agent_id"`
+	RuntimeID                        string          `json:"runtime_id"`
+	IssueID                          string          `json:"issue_id"`
+	WorkspaceID                      string          `json:"workspace_id"`
+	Status                           string          `json:"status"`
+	Priority                         int32           `json:"priority"`
+	DispatchedAt                     *string         `json:"dispatched_at"`
+	StartedAt                        *string         `json:"started_at"`
+	CompletedAt                      *string         `json:"completed_at"`
+	Result                           any             `json:"result"`
+	Error                            *string         `json:"error"`
+	FailureReason                    string          `json:"failure_reason,omitempty"` // see TaskService.MaybeRetryFailedTask
+	Attempt                          int32           `json:"attempt"`
+	MaxAttempts                      int32           `json:"max_attempts"`
+	ParentTaskID                     *string         `json:"parent_task_id,omitempty"`
+	Agent                            *TaskAgentData  `json:"agent,omitempty"`
+	Repos                            []RepoData      `json:"repos,omitempty"`
+	CreatedAt                        string          `json:"created_at"`
+	PriorSessionID                   string          `json:"prior_session_id,omitempty"`                    // session ID from a previous task on same issue
+	PriorWorkDir                     string          `json:"prior_work_dir,omitempty"`                      // work_dir from a previous task on same issue
+	TriggerCommentID                 *string         `json:"trigger_comment_id,omitempty"`                  // comment that triggered this task
+	TriggerCommentContent            string          `json:"trigger_comment_content,omitempty"`             // content of the triggering comment
+	TriggerSummary                   *string         `json:"trigger_summary,omitempty"`                     // canonical short description snapshot — comment text / autopilot title — taken at task creation; survives source edits/deletes
+	TriggerAuthorType                string          `json:"trigger_author_type,omitempty"`                 // "agent" or "member" — author kind of the triggering comment
+	TriggerAuthorName                string          `json:"trigger_author_name,omitempty"`                 // display name of the triggering comment author
+	ChatSessionID                    string          `json:"chat_session_id,omitempty"`                     // non-empty for chat tasks
+	ChatMessage                      string          `json:"chat_message,omitempty"`                        // user message for chat tasks
+	AutopilotRunID                   string          `json:"autopilot_run_id,omitempty"`                    // non-empty for autopilot-spawned tasks
+	AutopilotID                      string          `json:"autopilot_id,omitempty"`                        // autopilot that spawned this task
+	AutopilotTitle                   string          `json:"autopilot_title,omitempty"`                     // autopilot title used as task context
+	AutopilotDescription             string          `json:"autopilot_description,omitempty"`               // autopilot description used as task prompt
+	AutopilotSource                  string          `json:"autopilot_source,omitempty"`                    // manual, schedule, webhook, or api
+	AutopilotTriggerPayload          json.RawMessage `json:"autopilot_trigger_payload,omitempty"`           // optional trigger payload for webhook/api runs
+	QuickCreatePrompt                string          `json:"quick_create_prompt,omitempty"`                 // user's natural-language input for quick-create tasks
+	WorkingFolder                    string          `json:"working_folder,omitempty"`                      // project-level local folder override for agent workdir
+	Kind                             string          `json:"kind"`                                          // discriminator: "comment" | "autopilot" | "chat" | "quick_create" | "direct" — used by the activity row to label tasks that have no linked issue
+	RequestingUserName               string          `json:"requesting_user_name,omitempty"`                // runtime owner display name for agent brief
 	RequestingUserProfileDescription string          `json:"requesting_user_profile_description,omitempty"` // runtime owner profile description for agent brief
+	// AuthToken is the task-scoped `mat_` token the daemon must inject as
+	// MULTICA_TOKEN in the agent process environment. Only the daemon claim
+	// path populates it.
+	AuthToken string `json:"auth_token,omitempty"`
 }
 
 // TaskAgentData holds agent info included in claim responses so the daemon

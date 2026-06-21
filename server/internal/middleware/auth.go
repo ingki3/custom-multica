@@ -44,6 +44,30 @@ func Auth(queries *db.Queries, patCache *auth.PATCache) func(http.Handler) http.
 				return
 			}
 
+			// Agent task token: tokens starting with "mat_". These are minted by
+			// the daemon claim endpoint and are bound to one agent/task/workspace.
+			if strings.HasPrefix(tokenString, "mat_") {
+				if queries == nil {
+					http.Error(w, `{"error":"invalid token"}`, http.StatusUnauthorized)
+					return
+				}
+				tok, err := queries.GetTaskTokenByHash(r.Context(), auth.HashToken(tokenString))
+				if err != nil {
+					slog.Warn("auth: invalid task token", "path", r.URL.Path, "error", err)
+					http.Error(w, `{"error":"invalid token"}`, http.StatusUnauthorized)
+					return
+				}
+
+				r.Header.Set("X-User-ID", uuidToString(tok.UserID))
+				r.Header.Set("X-Agent-ID", uuidToString(tok.AgentID))
+				r.Header.Set("X-Task-ID", uuidToString(tok.TaskID))
+				r.Header.Set("X-Workspace-ID", uuidToString(tok.WorkspaceID))
+				r.Header.Set("X-Actor-Type", "agent")
+
+				next.ServeHTTP(w, r)
+				return
+			}
+
 			// PAT: tokens starting with "mul_"
 			if strings.HasPrefix(tokenString, "mul_") {
 				hash := auth.HashToken(tokenString)
