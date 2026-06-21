@@ -148,6 +148,7 @@ The daemon auto-detects these AI CLIs on your PATH:
 | [Cursor Agent](https://cursor.com/) | `cursor-agent` | Cursor's headless coding agent |
 | Kimi | `kimi` | Moonshot coding agent |
 | Kiro CLI | `kiro-cli` | Kiro ACP coding agent |
+| Antigravity | `agy` | Google Antigravity coding agent |
 
 You need at least one installed. The daemon registers each detected CLI as an available runtime.
 
@@ -201,6 +202,8 @@ Agent-specific overrides:
 | `MULTICA_KIMI_MODEL` | Override the Kimi model used |
 | `MULTICA_KIRO_PATH` | Custom path to the `kiro-cli` binary |
 | `MULTICA_KIRO_MODEL` | Override the Kiro model used |
+| `MULTICA_AGY_PATH` | Custom path to the `agy` binary |
+| `MULTICA_AGY_MODEL` | Override the Antigravity model used |
 
 `MULTICA_CLAUDE_ARGS` and `MULTICA_CODEX_ARGS` are parsed with POSIX shellword quoting, so values such as `--model "gpt-5.1 codex" --sandbox read-only` are split like a shell command line. Agent arguments are applied in this order: hardcoded Multica defaults, daemon-wide env defaults, then per-agent `custom_args` from the task.
 
