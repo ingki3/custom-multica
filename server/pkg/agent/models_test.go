@@ -27,6 +27,37 @@ func TestListModelsStaticProviders(t *testing.T) {
 	}
 }
 
+func TestClaudeStaticModelsExposeCurrentClaudeCodeModels(t *testing.T) {
+	models := claudeStaticModels()
+	ids := map[string]Model{}
+	defaultCount := 0
+	for _, m := range models {
+		ids[m.ID] = m
+		if m.Default {
+			defaultCount++
+		}
+	}
+	for _, want := range []string{
+		"claude-fable-5",
+		"claude-opus-4-8",
+		"claude-sonnet-4-6",
+		"claude-haiku-4-5-20251001",
+	} {
+		if _, ok := ids[want]; !ok {
+			t.Errorf("missing expected Claude model %q in: %+v", want, models)
+		}
+	}
+	if got := ids["claude-opus-4-8"].Label; got != "Claude Opus 4.8" {
+		t.Errorf("claude-opus-4-8 label = %q", got)
+	}
+	if !ids["claude-sonnet-4-6"].Default {
+		t.Errorf("expected Claude Sonnet 4.6 to remain the display default")
+	}
+	if defaultCount != 1 {
+		t.Errorf("expected exactly one Claude default, got %d", defaultCount)
+	}
+}
+
 func TestGeminiStaticModelsExposesAliasesAndGemini3(t *testing.T) {
 	// Gemini CLI has no `models list` subcommand, so we expose the
 	// CLI's own aliases (auto / pro / flash / flash-lite) plus

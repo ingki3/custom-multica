@@ -2,6 +2,7 @@
 
 ## Completed
 
+- [x] **Claude 런타임 모델 목록 최신화** — Claude Code 2.1.185의 `claude models` 출력 기준으로 `claude-fable-5`(Claude Fable 5)와 `claude-opus-4-8`(Claude Opus 4.8)을 Claude runtime static catalog에 추가하고 Sonnet 4.6 기본값은 유지. Opus 4.8 비용 추정 매핑과 회귀 테스트를 추가했으며, 로컬 CLI 빌드/설치 및 데몬 재시작 후 `/api/runtimes/{claude}/models` 결과에 Fable 5/Opus 4.8/Sonnet 4.6이 표시되는 것을 확인.
 - [x] **Antigravity `agy` 런타임 자동 감지** — `agy` provider를 추가해 데몬 `LoadConfig`가 `MULTICA_AGY_PATH`/`MULTICA_AGY_MODEL`을 읽고 PATH의 `agy` CLI를 런타임으로 등록하도록 구현. `agy --print` 기반 실행 backend, `agy models` 기반 동적 모델 조회, launch header, 회귀 테스트를 추가. 지원 CLI/환경변수 문서와 provider matrix를 12개 도구 기준으로 갱신하고, 로컬 `/opt/homebrew/bin/multica` 바이너리를 새 빌드로 교체한 뒤 데몬을 재시작해 status에 `agy`가 표시되는 것을 확인.
 - [x] **Antigravity Planning Agent task-scoped auth token 정식 수정** — Migration 073으로 `task_token` 테이블 추가, sqlc query/generated code 추가, `mat_` task token 생성 helper 추가. daemon task claim 응답에 `auth_token`을 mint/persist/반환하고, middleware에서 `mat_` 토큰을 agent/task/workspace actor header로 인증하도록 구현. task 완료/실패/취소 시 token revoke를 추가하고, claim/auth 회귀 테스트 및 targeted backend tests를 통과.
 - [x] **Multica CLI issue dependency subcommand** — `multica issue dependency` 하위에 `list`, `add --direction prerequisite|next`, `requires`, `then-runs`, `remove/delete/rm` 명령을 추가. 기존 `issue create/update --requires/--then-runs`와 동일한 `/api/issues/{id}/dependencies` API를 사용하고, table/json 출력 및 도움말/회귀 테스트를 추가. 로컬 설치 CLI도 새 바이너리로 교체하여 즉시 사용 가능하게 배포.
