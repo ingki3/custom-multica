@@ -290,6 +290,14 @@ export interface RuntimeModel {
   label: string;
   provider?: string;
   default?: boolean;
+  thinking?: {
+    supported_levels: Array<{
+      value: string;
+      label: string;
+      description?: string;
+    }>;
+    default_level?: string;
+  };
 }
 
 export type RuntimeModelListStatus =

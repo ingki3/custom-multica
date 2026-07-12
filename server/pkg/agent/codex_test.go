@@ -1065,6 +1065,54 @@ func TestCodexExecuteSurfacesStderrWhenChildExitsEarly(t *testing.T) {
 	}
 }
 
+func TestCodexExecuteCompletedNotificationWinsTurnStartEOFRace(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-eof-race"}}}'`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-eof-race","item":{"type":"agentMessage","id":"msg-1","text":"finished before EOF"}}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr-eof-race","turn":{"id":"turn-eof-race","status":"completed"}}}'`+"\n")
+
+	result := executeFakeCodex(t, fakePath, ExecOptions{Timeout: 5 * time.Second})
+	if result.Status != "completed" {
+		t.Fatalf("completed notification lost to EOF: status=%q error=%q", result.Status, result.Error)
+	}
+	if result.Output != "finished before EOF" {
+		t.Fatalf("output = %q, want completed agent message", result.Output)
+	}
+	if strings.Contains(result.Error, "turn/start failed") {
+		t.Fatalf("synthetic EOF won race: %q", result.Error)
+	}
+}
+
+func TestCodexExecuteEOFFailsWithoutCompletedNotification(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-eof"}}}'`+"\n"+
+		`read line`+"\n")
+
+	result := executeFakeCodex(t, fakePath, ExecOptions{Timeout: 5 * time.Second})
+	if result.Status != "failed" || !strings.Contains(result.Error, "turn/start failed") {
+		t.Fatalf("EOF without completion should fail: status=%q error=%q", result.Status, result.Error)
+	}
+}
+
 func TestCodexExecuteTimesOutWhenTurnStopsAfterToolResult(t *testing.T) {
 	t.Parallel()
 	if runtime.GOOS == "windows" {

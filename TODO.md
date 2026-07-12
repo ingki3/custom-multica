@@ -20,6 +20,88 @@
 ## Backlog
 
 
+- [ ] **[Upstream Release Review 2026-07-12] v0.3.34~v0.3.43 및 upstream/main 후속 커밋 수동 포팅 후보 정리** — GitHub Releases(`https://github.com/multica-ai/multica/releases`) 기준 최신 릴리즈 `v0.3.43`, fetch 기준 upstream 위치 `v0.3.43-27-g3bd69bdaa`까지 확인. 현재 fork `dev`는 `02d12797a`이며, 로컬 WIP(`server/pkg/agent/models.go`, `server/pkg/agent/models_test.go`, `.hermes/`)가 있어 broad merge 금지. 아래 후보는 **기능 단위 수동 포팅**으로 진행하고, migration 번호는 fork 흐름에 맞게 재채번한다.
+  - **포팅 원칙**:
+    1. `upstream/main`을 통째로 merge/rebase하지 않는다. custom fork에는 task-scoped auth token, working folder/worktree, issue dependency, workspace MCP registry, Dev Agent fallback 등 충돌 가능성이 큰 기능이 많다.
+    2. PR은 작게 나눈다: `안전 패치`, `runtime 안정성`, `task/comment delivery`, `daemon exec isolation`, `UI/전략 기능` 순서.
+    3. SQL 변경은 `make sqlc` 또는 `cd server && go run github.com/sqlc-dev/sqlc/cmd/sqlc@latest generate` 후 generated diff를 검토한다.
+    4. CLI 동작 변경은 `multica-cli-manual.md`와 public CLI docs 동기화 여부를 확인한다.
+    5. 검증은 최소 `cd server && go test ./...`, frontend 영향 시 `pnpm typecheck && pnpm test`, CLI 배포 시 `make build && install -m 0755 server/bin/multica /opt/homebrew/bin/multica && multica --version`.
+  - **1차: 작은 안전 패치 묶음(낮은 충돌, 먼저 적용 권장)**:
+    1. `9f775db16` — `fix(cli): stop pflag from garbling login --token help output (MUL-4410)`; 파일: `server/cmd/multica/cmd_login.go`, `cmd_auth_test.go`. CLI help 품질 개선, 위험 낮음.
+    2. `3fdcdb1a3` — `fix(cli): retry transient assignee resolver fetches`; 파일: `server/cmd/multica/cmd_issue.go`, `cmd_issue_test.go`. agent/CLI issue assign 안정성 개선.
+    3. `b6adf23f9` — `feat(api): emit Content-Length header on JSON responses`; 파일: `server/internal/handler/handler.go`, `server/cmd/server/health.go`. 프록시/클라이언트 호환성 개선.
+    4. `932bbf2bb` — `fix(editor): guard Mod-Enter submit against open IME composition`; 파일: `packages/views/editor/extensions/submit-shortcut.ts`. 한글/일본어 IME 입력 중 accidental submit 방지.
+    5. `78591f602` — `test(server): cap pkg/agent test concurrency under -race`; race/full test 안정화 후보.
+  - **2차: Codex/Claude/Antigravity runtime 안정성 묶음(높은 우선순위)**:
+    - **상태 (2026-07-12)**: fork 구조에 맞춘 수동 포팅 완료. ChatGPT.app/Codex.app 탐색, hook wrapper 회피, Codex model-catalog 복사·동적 model/reasoning discovery와 GPT-5.6 fallback, turn-completed/EOF race, Claude stale-resume/root-sudo preflight, agy current-turn transcript recovery를 회귀 테스트와 함께 반영. 로컬에 아직 `thinking_level` 저장/실행 옵션이 없어 `8e0fbecab`의 effort persistence/validation 부분은 별도 schema/UI 작업으로 남김.
+    1. `c7002e3b3` — `fix(daemon): detect Codex CLI under ChatGPT.app on macOS`; 파일: `server/internal/daemon/config.go`, `config_test.go`. macOS ChatGPT.app 내 Codex CLI 감지.
+    2. `f7ca045fb` — `feat(daemon): discover Codex model and reasoning catalog dynamically`; 파일: `server/pkg/agent/models.go`, `thinking.go`, `server/internal/handler/agent.go`, `server/cmd/multica/cmd_agent.go`, core agent types. 현재 fork의 static Codex catalog WIP와 충돌 가능성이 높으므로 이 WIP와 함께 정리.
+    3. `6b980a8e7` / `8e0fbecab` — Codex `gpt-5.6` sol/terra/luna 모델 및 exact alias/empty-model effort validation. 현재 fork의 `gpt-5.5`/fallback classifier와 함께 catalog policy 결정 필요.
+    4. `65269ef92` — `fix(daemon): copy Codex model catalog into task home`; 파일: `server/internal/daemon/execenv/codex_home.go`. task sandbox에서 Codex model catalog 누락 방지.
+    5. `1ff99e5a` — `fix: honor completed codex turns during process eof races`; 파일: `server/pkg/agent/codex.go`. EOF race로 성공 turn을 실패 처리하는 문제 방지.
+    6. `521052a0` — `fix(daemon): recover stale Claude resume sessions`; 파일: `server/pkg/agent/claude.go`. stale Claude session 복구.
+    7. `e36c0cd4` — `fix: preflight Claude root/sudo launches with an actionable error`; root/sudo 실행 전 명확한 에러 제공.
+    8. `d4f57aff` — `Fix daemon agent discovery around hook wrappers`; wrapper 경유 provider discovery 안정화.
+    9. `8b529efc` — `Fix recovered Antigravity transcript messages`; Antigravity transcript recovery 개선.
+  - **3차: task/comment/chat delivery 안정성 묶음(매우 중요, 충돌 큼)**:
+    1. `75695a2e` — `fix(comments): guarantee at-least-once processing of user comments (MUL-4195)`; 파일: `server/internal/handler/comment.go`, `daemon.go`, `server/internal/service/task.go`, migrations `agent_task_coalesced_comments`. user comment 누락 방지.
+    2. `bf161f2f` — `fix(tasks): preserve merged comment delivery`; comment coalescing 후 delivery 보존.
+    3. `4db1abe1` — `fix(comment): compensate dropped agent→agent @mentions in completion reconcile`; A2A mention 누락 보정.
+    4. `cc3daaf3` — `fix: scope claim-time comment fetch to workspace + guard --attachment paths (MUL-4252)`; multi-tenant scoping 및 attachment path guard.
+    5. `86c3f305` — `fix(server): keep originator on agent-created issues so A2A mentions stay authorized (MUL-4305)`; fallback/sub-agent issue 생성 권한과 직접 연관.
+    6. `cb87dd10`, `f599333f`, `3c417ea6` — direct-chat input ownership, per-root-thread coalesced reply routing, authz/order correction. Chat V2와 얽혀 있을 수 있어 별도 설계 검토 후 적용.
+    7. `7a405fd1` — `fix(daemon): keep the task transcript ordered and complete`; daemon transcript ordering/complete 보존. fallback prompt context와 충돌 검토 필요.
+  - **4차: daemon execution isolation / runtime recovery 묶음(working folder와 충돌 주의)**:
+    1. `aecd47b5` — `fix(daemon): mark workspaces root so escaped subprocesses still fail closed`; 파일: `server/internal/daemon/execenv/context.go`, `execenv.go`.
+    2. `e002ee5a` — `fix(daemon): isolate agent temp dirs`; task temp dir 격리.
+    3. `528d3c7f` — `fix: use short task temp dirs for agent env`; 긴 path로 인한 agent env 문제 완화.
+    4. `101cc29e` — `fix(daemon): time out repo cache git commands`; repo cache hang 방지.
+    5. `a69d969f` — `fix(sweeper): gate running-task wall clock on runtime liveness`; runtime이 죽은 상태에서 running task wall-clock 처리 개선. fallback/retry 정책과 함께 설계 필요.
+    6. `6c3b79db` — `feat(daemon): bound daemon.log size with rotation (MUL-4330)`; 장기 실행 local/daemon 운영에 중요, 상대적으로 단독 포팅 가능.
+  - **5차: security/guardrail 후보**:
+    1. `3b7eafc3` — `fix(cli): reject --description-file/--content-file paths outside the workdir (MUL-4252)`; CLI agent 사용 시 workspace 밖 파일 접근 방지. `multica-cli-manual.md` 업데이트 필요.
+    2. `0c4c3ff0` — `fix(cli): prevent daemon-managed CLI from silently using user tokens (MUL-3922)`; task-scoped `mat_` token 정책과 함께 비교. agent task가 사용자 토큰을 조용히 쓰는 문제 방지.
+    3. `4f371c5c` — `fix: expose mcp config for supported providers`; MCP support matrix 정확화.
+  - **6차: realtime/search/migration 운영 안정성**:
+    1. `e3e3e7e` — `fix(realtime): bounded replay window for ShardedStreamRelay on restart`; 우리 repo에 `ShardedStreamRelay`가 이미 있으므로 반영 여부 diff 확인부터.
+    2. `f30898f3` — `MUL-4299: guard migration numbering`; fork에서 migration 충돌을 자주 겪으므로 guard 도입 검토.
+    3. `359ef61d` — `fix(search): pg_trgm index fallback + statement_timeout guard`; search 성능/장애 격리.
+    4. `75e8bd5b` — `fix: make release index migrations concurrent`; index migration 운영 리스크 완화. upstream migration 번호 그대로 사용 금지.
+  - **7차: product/UX 전략 후보(별도 큰 milestone)**:
+    1. `a51ab4d5` — `feat(chat): Chat V2 — first-class IM-style Chat tab (MUL-4171)`; web/desktop/core/views/server/migrations 전체를 건드리는 대형 기능. 즉시 포팅보다 별도 설계 필요.
+    2. `e6e63e6` — LLM-generated chat session titles; Chat V2와 묶어서 검토.
+    3. `a1409828` — Agent Skills/MCP capabilities redesign; 우리 fork의 workspace MCP registry와 충돌 가능성이 커서 설계 비교 필요.
+    4. `05d92985` / `c56f0816` / `3c3a3fed` — runtime local skills 권한/보존/Add to agent 개선. MCP/skills redesign과 묶어서 검토.
+    5. `fd58e13b`, `2affa34f`, `f8c4c881` — custom runtime names, searchable/machine-grouped/two-level runtime picker, runtime model+effort hover card. 다중 runtime 환경 UX 개선.
+    6. `519d2aef` — CLI issue ordering(`issue reorder`, `--position`, `--sort/--direction`); issue dependency 흐름과 결합 가치 있음.
+    7. `c377d7fb`, `c4b116ec` — scoped label management 및 create issue dialog label entry.
+    8. `835b1d5e`, `bcad2edc`, `8c3745dc` — issue detail thread minimap, Cmd+F in-page find, Show sub-issues toggle.
+  - **8차: editor/attachment 품질 후보**:
+    1. `3f02083f` — Linear-style issue identifier autolink.
+    2. `cac2965d`, `0ffb5f68` — markdown URL autolink parse tree/trailing delimiter fix.
+    3. `5ed381a9` — comment attachment URL resolution.
+    4. `30d3aca6` — HTTP Range resume on proxy download.
+    5. `c84a939c` — all attachment upload buttons multi-file selection.
+    6. `c3a33fff` — inline data-URI image rendering.
+  - **후순위/선택 후보**:
+    1. Slack/Lark/Composio 계열(`4217de`, `fd3216`, `240ec4`, `159d9b`, `ccacce`, 등)은 현재 fork 핵심 운영 경로가 아니면 보류.
+    2. mobile 관련 변경은 우리 fork에서 mobile을 적극 운영하지 않는다면 보류.
+    3. avatar/cropper/surface system UI redesign(`c6783efd`, `f4de0948`, `4efcfb96`, `ca46fdb4`)은 시각 품질 개선이지만 충돌 범위가 넓어 안정성 포팅 이후 검토.
+  - **주요 충돌 예상 파일/영역**:
+    1. `server/pkg/db/queries/agent.sql`, generated `agent.sql.go`, `models.go` — fallback/task-token/chat/comment/runtime liveness 변경이 모두 겹칠 수 있음.
+    2. `server/internal/service/task.go` — retry/fallback/comment delivery/chat input ownership 충돌 예상.
+    3. `server/internal/daemon/daemon.go` — working folder, task-scoped auth, provider discovery, transcript ordering, log rotation 충돌 예상.
+    4. `server/internal/handler/daemon.go`, `comment.go`, `chat.go`, `issue.go` — originator/comment/claim/chat delivery 변경 충돌 예상.
+    5. `packages/core/types/agent.ts` — fallback fields와 upstream runtime/capability/model/thinking fields 충돌 가능.
+    6. `packages/views/chat/*` — Chat V2와 현재 chat-window/fallback context UI 충돌 가능.
+  - **권장 실행 순서**:
+    1. `safe-upstream-patches` PR: CLI help/retry, Content-Length, IME submit guard, test concurrency cap, daemon log rotation.
+    2. `runtime-stability-sync` PR: Codex dynamic catalog/ChatGPT.app detection/EOF race, Claude stale resume/root preflight, Antigravity transcript recovery.
+    3. `task-comment-delivery-sync` PR: at-least-once comments, merged comment delivery, A2A reconcile, originator preservation, claim-time workspace scoping.
+    4. `daemon-exec-isolation-sync` PR: workspace root marker, temp dir isolation, short temp dirs, repo cache timeout, runtime liveness sweeper.
+    5. `runtime-ui-capabilities-sync` PR: runtime picker/custom names/capabilities/skills/MCP redesign은 별도 설계 후.
+    6. `chat-v2-sync`는 마지막에 별도 milestone로 진행.
 - [ ] **[Upstream Sync] 안정성 → 데이터 보존 → Cursor managed MCP → workspace repo registry 순차 반영** — 코드 레벨 검토 결과는 `docs/upstream-sync-candidates-2026-06-13.md`에 저장. 1차 안정성 후보 중 daemon workdir provisioning race(`9439a85aa`), stale resume session drop(`8151f60c6`), ACP stale session clear(`6acca84c2`), Codex cached input usage normalization(`5b7eb9ad2`), setup self-host `MULTICA_SERVER_URL` 반영(`42251b42f`)을 `feat/upstream-stability-sync`에서 포팅 완료하고 targeted Go tests 통과. 2차 데이터 보존 후보: attachment `markdown_url` 계열, issue description flush, create/quick-create attachment binding, chat stop/send recovery. 3차 Cursor managed MCP(`f415099c4`). 4차 workspace repo registry CLI/API(`7db3e507d`). broad merge 금지, 기능 단위 수동 포팅 우선.
 - [x] **Working Folder 동시 접근 정책** — 같은 프로젝트에 여러 에이전트가 동시에 할당되면 같은 폴더에서 작업하게 됨. 하이브리드 정책 구현: git 레포인 경우 `.multica_worktrees/{taskID}/`에 per-task worktree 자동 생성으로 격리, non-git 폴더인 경우 태스크를 큐로 되돌려 직렬화. 데몬 내 `workingFolderTasks map[string]int`로 폴더별 활성 태스크 수 추적. `RequeueTask` API 엔드포인트 추가. 단일 태스크 시 기존 동작 변경 없음.
 - [ ] **Working Folder에 생성되는 .agent_context/ 정리** — 에이전트 작업 후 `.agent_context/` 폴더가 사용자 프로젝트에 남음. 자동 정리 정책 또는 `.gitignore` 자동 추가 검토.

@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -84,90 +85,38 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		return Config{}, err
 	}
 
-	// Probe available agent CLIs
+	// Probe available agent CLIs. Resolve bare command names to canonical
+	// executable paths and skip recursive wrappers under ~/.multica/hooks.
 	agents := map[string]AgentEntry{}
-	claudePath := envOrDefault("MULTICA_CLAUDE_PATH", "claude")
-	if _, err := exec.LookPath(claudePath); err == nil {
-		agents["claude"] = AgentEntry{
-			Path:  claudePath,
-			Model: strings.TrimSpace(os.Getenv("MULTICA_CLAUDE_MODEL")),
+	probe := func(provider, envVar, defaultCmd, modelEnv string) {
+		cmd := envOrDefault(envVar, defaultCmd)
+		path, err := resolveAgentExecutablePath(cmd)
+		if err != nil {
+			return
 		}
+		agents[provider] = AgentEntry{Path: path, Model: strings.TrimSpace(os.Getenv(modelEnv))}
 	}
-	codexPath := envOrDefault("MULTICA_CODEX_PATH", "codex")
-	if _, err := exec.LookPath(codexPath); err == nil {
-		agents["codex"] = AgentEntry{
-			Path:  codexPath,
-			Model: strings.TrimSpace(os.Getenv("MULTICA_CODEX_MODEL")),
-		}
-	}
-	opencodePath := envOrDefault("MULTICA_OPENCODE_PATH", "opencode")
-	if _, err := exec.LookPath(opencodePath); err == nil {
-		agents["opencode"] = AgentEntry{
-			Path:  opencodePath,
-			Model: strings.TrimSpace(os.Getenv("MULTICA_OPENCODE_MODEL")),
-		}
-	}
-	openclawPath := envOrDefault("MULTICA_OPENCLAW_PATH", "openclaw")
-	if _, err := exec.LookPath(openclawPath); err == nil {
-		agents["openclaw"] = AgentEntry{
-			Path:  openclawPath,
-			Model: strings.TrimSpace(os.Getenv("MULTICA_OPENCLAW_MODEL")),
-		}
-	}
-	hermesPath := envOrDefault("MULTICA_HERMES_PATH", "hermes")
-	if _, err := exec.LookPath(hermesPath); err == nil {
-		agents["hermes"] = AgentEntry{
-			Path:  hermesPath,
-			Model: strings.TrimSpace(os.Getenv("MULTICA_HERMES_MODEL")),
-		}
-	}
-	geminiPath := envOrDefault("MULTICA_GEMINI_PATH", "gemini")
-	if _, err := exec.LookPath(geminiPath); err == nil {
-		agents["gemini"] = AgentEntry{
-			Path:  geminiPath,
-			Model: strings.TrimSpace(os.Getenv("MULTICA_GEMINI_MODEL")),
-		}
-	}
-	piPath := envOrDefault("MULTICA_PI_PATH", "pi")
-	if _, err := exec.LookPath(piPath); err == nil {
-		agents["pi"] = AgentEntry{
-			Path:  piPath,
-			Model: strings.TrimSpace(os.Getenv("MULTICA_PI_MODEL")),
-		}
-	}
-	cursorPath := envOrDefault("MULTICA_CURSOR_PATH", "cursor-agent")
-	if _, err := exec.LookPath(cursorPath); err == nil {
-		agents["cursor"] = AgentEntry{
-			Path:  cursorPath,
-			Model: strings.TrimSpace(os.Getenv("MULTICA_CURSOR_MODEL")),
-		}
-	}
-	copilotPath := envOrDefault("MULTICA_COPILOT_PATH", "copilot")
-	if _, err := exec.LookPath(copilotPath); err == nil {
-		agents["copilot"] = AgentEntry{
-			Path:  copilotPath,
-			Model: strings.TrimSpace(os.Getenv("MULTICA_COPILOT_MODEL")),
-		}
-	}
-	kimiPath := envOrDefault("MULTICA_KIMI_PATH", "kimi")
-	if _, err := exec.LookPath(kimiPath); err == nil {
-		agents["kimi"] = AgentEntry{
-			Path:  kimiPath,
-			Model: strings.TrimSpace(os.Getenv("MULTICA_KIMI_MODEL")),
-		}
-	}
-	kiroPath := envOrDefault("MULTICA_KIRO_PATH", "kiro-cli")
-	if _, err := exec.LookPath(kiroPath); err == nil {
-		agents["kiro"] = AgentEntry{
-			Path:  kiroPath,
-			Model: strings.TrimSpace(os.Getenv("MULTICA_KIRO_MODEL")),
-		}
-	}
-	agyPath := envOrDefault("MULTICA_AGY_PATH", "agy")
-	if _, err := exec.LookPath(agyPath); err == nil {
-		agents["agy"] = AgentEntry{
-			Path:  agyPath,
-			Model: strings.TrimSpace(os.Getenv("MULTICA_AGY_MODEL")),
+	probe("claude", "MULTICA_CLAUDE_PATH", "claude", "MULTICA_CLAUDE_MODEL")
+	probe("codex", "MULTICA_CODEX_PATH", "codex", "MULTICA_CODEX_MODEL")
+	probe("opencode", "MULTICA_OPENCODE_PATH", "opencode", "MULTICA_OPENCODE_MODEL")
+	probe("openclaw", "MULTICA_OPENCLAW_PATH", "openclaw", "MULTICA_OPENCLAW_MODEL")
+	probe("hermes", "MULTICA_HERMES_PATH", "hermes", "MULTICA_HERMES_MODEL")
+	probe("gemini", "MULTICA_GEMINI_PATH", "gemini", "MULTICA_GEMINI_MODEL")
+	probe("pi", "MULTICA_PI_PATH", "pi", "MULTICA_PI_MODEL")
+	probe("cursor", "MULTICA_CURSOR_PATH", "cursor-agent", "MULTICA_CURSOR_MODEL")
+	probe("copilot", "MULTICA_COPILOT_PATH", "copilot", "MULTICA_COPILOT_MODEL")
+	probe("kimi", "MULTICA_KIMI_PATH", "kimi", "MULTICA_KIMI_MODEL")
+	probe("kiro", "MULTICA_KIRO_PATH", "kiro-cli", "MULTICA_KIRO_MODEL")
+	probe("agy", "MULTICA_AGY_PATH", "agy", "MULTICA_AGY_MODEL")
+
+	// Codex Desktop bundles its CLI outside PATH. Only use the bundle fallback
+	// for the default command; an explicit MULTICA_CODEX_PATH remains authoritative.
+	if _, ok := agents["codex"]; !ok && strings.TrimSpace(os.Getenv("MULTICA_CODEX_PATH")) == "" {
+		for _, candidate := range codexDesktopAppBundlePaths() {
+			if isExecutableFile(candidate) {
+				agents["codex"] = AgentEntry{Path: canonicalExecutablePath(candidate), Model: strings.TrimSpace(os.Getenv("MULTICA_CODEX_MODEL"))}
+				break
+			}
 		}
 	}
 	if len(agents) == 0 {
@@ -385,4 +334,124 @@ func shellArgsFromEnv(name string) ([]string, error) {
 		return nil, fmt.Errorf("invalid %s: %w", name, err)
 	}
 	return args, nil
+}
+
+// resolveAgentExecutablePath pins a discovered executable to a canonical path.
+// A stale ~/.multica/hooks wrapper can recursively invoke itself, so bare
+// command discovery skips that directory when another executable is available.
+func resolveAgentExecutablePath(cmd string) (string, error) {
+	resolved, err := exec.LookPath(cmd)
+	if err != nil {
+		return "", err
+	}
+	if strings.ContainsAny(cmd, "/\\") {
+		return canonicalExecutablePath(resolved), nil
+	}
+	if isInMulticaHooksDir(resolved) {
+		if unshadowed, err := lookPathExcludingMulticaHooks(cmd); err == nil {
+			return unshadowed, nil
+		}
+		return "", exec.ErrNotFound
+	}
+	return canonicalExecutablePath(resolved), nil
+}
+
+func lookPathExcludingMulticaHooks(cmd string) (string, error) {
+	for _, dir := range filepath.SplitList(os.Getenv("PATH")) {
+		if dir == "" {
+			dir = "."
+		}
+		if isMulticaHooksDir(dir) {
+			continue
+		}
+		for _, name := range executableCandidateNames(cmd) {
+			candidate := filepath.Join(dir, name)
+			if isExecutableFile(candidate) {
+				return canonicalExecutablePath(candidate), nil
+			}
+		}
+	}
+	return "", exec.ErrNotFound
+}
+
+func isInMulticaHooksDir(path string) bool {
+	return path != "" && isMulticaHooksDir(filepath.Dir(path))
+}
+
+func isMulticaHooksDir(dir string) bool {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return false
+	}
+	return samePathDir(dir, filepath.Join(home, ".multica", "hooks"))
+}
+
+func samePathDir(a, b string) bool {
+	absA, err := filepath.Abs(a)
+	if err != nil {
+		return false
+	}
+	absB, err := filepath.Abs(b)
+	if err != nil {
+		return false
+	}
+	if realA, err := filepath.EvalSymlinks(absA); err == nil {
+		absA = realA
+	}
+	if realB, err := filepath.EvalSymlinks(absB); err == nil {
+		absB = realB
+	}
+	cleanA, cleanB := filepath.Clean(absA), filepath.Clean(absB)
+	if runtime.GOOS == "windows" {
+		return strings.EqualFold(cleanA, cleanB)
+	}
+	return cleanA == cleanB
+}
+
+func canonicalExecutablePath(path string) string {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return path
+	}
+	if real, err := filepath.EvalSymlinks(abs); err == nil {
+		return real
+	}
+	return abs
+}
+
+func isExecutableFile(path string) bool {
+	info, err := os.Stat(path)
+	if err != nil || info.IsDir() {
+		return false
+	}
+	return runtime.GOOS == "windows" || info.Mode()&0o111 != 0
+}
+
+func executableCandidateNames(cmd string) []string {
+	if runtime.GOOS != "windows" || filepath.Ext(cmd) != "" {
+		return []string{cmd}
+	}
+	names := []string{cmd}
+	for _, ext := range filepath.SplitList(strings.TrimSpace(os.Getenv("PATHEXT"))) {
+		if ext = strings.TrimSpace(ext); ext != "" {
+			names = append(names, cmd+ext)
+		}
+	}
+	return names
+}
+
+// OpenAI relocated the bundled CLI from Codex.app to ChatGPT.app. Keep the
+// legacy locations after the new paths for older installations.
+var codexDesktopAppBundlePaths = func() []string {
+	paths := []string{
+		"/Applications/ChatGPT.app/Contents/Resources/codex",
+		"/Applications/Codex.app/Contents/Resources/codex",
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		paths = append(paths,
+			filepath.Join(home, "Applications", "ChatGPT.app", "Contents", "Resources", "codex"),
+			filepath.Join(home, "Applications", "Codex.app", "Contents", "Resources", "codex"),
+		)
+	}
+	return paths
 }

@@ -1,6 +1,7 @@
 package logger
 
 import (
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -48,6 +49,21 @@ func NewLogger(component string) *slog.Logger {
 	})
 	return slog.New(handler).With("component", component)
 }
+
+// NewWriterLoggerDefault creates a named logger writing to w and installs its
+// unscoped base as slog's package-global default.
+func NewWriterLoggerDefault(component string, w io.Writer) *slog.Logger {
+	level := parseLevel(os.Getenv("LOG_LEVEL"))
+	base := slog.New(tint.NewHandler(w, &tint.Options{
+		Level:      level,
+		TimeFormat: "15:04:05.000",
+		NoColor:    true,
+	}))
+	slog.SetDefault(base)
+	return base.With("component", component)
+}
+
+func StderrIsTerminal() bool { return isTerminal(os.Stderr) }
 
 // RequestAttrs extracts request_id, user_id, and X-Client-* metadata from
 // an HTTP request for use in handler-level structured logging. Mirrors the

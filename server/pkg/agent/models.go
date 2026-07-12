@@ -25,10 +25,22 @@ import (
 // default, which is always closer to what the user's account /
 // environment actually supports than a static guess here.
 type Model struct {
-	ID       string `json:"id"`
-	Label    string `json:"label"`
-	Provider string `json:"provider,omitempty"`
-	Default  bool   `json:"default,omitempty"`
+	ID       string         `json:"id"`
+	Label    string         `json:"label"`
+	Provider string         `json:"provider,omitempty"`
+	Default  bool           `json:"default,omitempty"`
+	Thinking *ModelThinking `json:"thinking,omitempty"`
+}
+
+type ModelThinking struct {
+	SupportedLevels []ThinkingLevel `json:"supported_levels"`
+	DefaultLevel    string          `json:"default_level,omitempty"`
+}
+
+type ThinkingLevel struct {
+	Value       string `json:"value"`
+	Label       string `json:"label"`
+	Description string `json:"description,omitempty"`
 }
 
 // modelCache memoizes dynamic discovery calls so repeated UI loads
@@ -58,7 +70,9 @@ func ListModels(ctx context.Context, providerType, executablePath string) ([]Mod
 	case "claude":
 		return claudeStaticModels(), nil
 	case "codex":
-		return codexStaticModels(), nil
+		return cachedDiscovery(providerType+":"+executablePath, func() ([]Model, error) {
+			return discoverCodexModels(ctx, executablePath), nil
+		})
 	case "gemini":
 		return geminiStaticModels(), nil
 	case "cursor":
@@ -156,9 +170,16 @@ func claudeStaticModels() []Model {
 
 func codexStaticModels() []Model {
 	return []Model{
-		{ID: "gpt-5.4", Label: "GPT-5.4", Provider: "openai", Default: true},
+		{ID: "gpt-5.6-sol", Label: "GPT-5.6 Sol", Provider: "openai", Default: true},
+		{ID: "gpt-5.6-terra", Label: "GPT-5.6 Terra", Provider: "openai"},
+		{ID: "gpt-5.6-luna", Label: "GPT-5.6 Luna", Provider: "openai"},
+		{ID: "gpt-5.5", Label: "GPT-5.5", Provider: "openai"},
+		{ID: "gpt-5.5-pro", Label: "GPT-5.5 Pro", Provider: "openai"},
+		{ID: "gpt-5.4", Label: "GPT-5.4", Provider: "openai"},
 		{ID: "gpt-5.4-mini", Label: "GPT-5.4 mini", Provider: "openai"},
+		{ID: "gpt-5.4-nano", Label: "GPT-5.4 nano", Provider: "openai"},
 		{ID: "gpt-5.3-codex", Label: "GPT-5.3 Codex", Provider: "openai"},
+		{ID: "gpt-5.2-codex", Label: "GPT-5.2 Codex", Provider: "openai"},
 		{ID: "gpt-5", Label: "GPT-5", Provider: "openai"},
 		{ID: "o3", Label: "o3", Provider: "openai"},
 		{ID: "o3-mini", Label: "o3-mini", Provider: "openai"},

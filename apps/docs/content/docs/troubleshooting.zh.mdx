@@ -159,7 +159,7 @@ netstat -ano | findstr :8080    # Windows
 
 | 组件 | 位置 | 命令 |
 |---|---|---|
-| **守护进程** | `~/.multica/daemon.log`（后台模式）或前台 stdout | `multica daemon logs -f --lines 100` |
+| **守护进程** | `~/.multica/daemon.log`（轮转结构化日志）、`~/.multica/daemon.err.log`（崩溃输出）或前台 stdout | `multica daemon logs -f --lines 100` |
 | **服务器（Docker）** | container stdout | `docker logs -f <container>` |
 | **服务器（systemd）** | journal | `journalctl -u multica-server -f` |
 | **前端（dev）** | `pnpm dev` 所在终端 | 直接看 |
