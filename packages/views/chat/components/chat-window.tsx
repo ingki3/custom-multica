@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Minus, Maximize2, Minimize2, ChevronDown, FolderKanban, Plus, Check, X } from "lucide-react";
+import { Minus, Maximize2, Minimize2, ChevronDown, FolderKanban, Plus, Check } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
 import {

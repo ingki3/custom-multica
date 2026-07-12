@@ -1092,7 +1092,8 @@ func (d *Daemon) handleTask(ctx context.Context, task Task) {
 		taskLog.Error("task failed", "error", err)
 		// runTask returned without a TaskResult, so we don't have a SessionID
 		// to forward — best we can do is record the failure.
-		if failErr := d.client.FailTask(ctx, task.ID, err.Error(), "", "", "agent_error"); failErr != nil {
+		failureReason := classifyAgentFailure(provider, err.Error())
+		if failErr := d.client.FailTask(ctx, task.ID, err.Error(), "", "", failureReason); failErr != nil {
 			taskLog.Error("fail task callback failed", "error", failErr)
 		}
 		return
@@ -1537,18 +1538,20 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 		if errMsg == "" {
 			errMsg = fmt.Sprintf("%s execution %s", provider, result.Status)
 		}
+		failureReason := classifyAgentFailure(provider, errMsg)
 		// Forward SessionID/WorkDir on the blocked path: backends commonly
 		// emit a real session_id before failing (rate-limit, tool error,
 		// model reject, …). Without this the chat_session resume pointer
 		// would either be left stale or overwritten with NULL on the
 		// server, causing the next chat turn to lose context.
 		return TaskResult{
-			Status:    "blocked",
-			Comment:   errMsg,
-			SessionID: result.SessionID,
-			WorkDir:   env.WorkDir,
-			EnvRoot:   env.RootDir,
-			Usage:     usageEntries,
+			Status:        "blocked",
+			Comment:       errMsg,
+			SessionID:     result.SessionID,
+			WorkDir:       env.WorkDir,
+			EnvRoot:       env.RootDir,
+			FailureReason: failureReason,
+			Usage:         usageEntries,
 		}, nil
 	}
 }

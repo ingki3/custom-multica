@@ -100,6 +100,94 @@ func TestBuildPromptNoIssueDetails(t *testing.T) {
 	}
 }
 
+func TestClassifyAgentFailure(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		provider string
+		errMsg   string
+		want     string
+	}{
+		{
+			name:     "codex expired chatgpt token",
+			provider: "codex",
+			errMsg:   "Your access token could not be refreshed. Please log out and sign in again.",
+			want:     "auth_expired",
+		},
+		{
+			name:     "codex token expired backend api",
+			provider: "codex",
+			errMsg:   "unexpected status 401 Unauthorized: Provided authentication token is expired. auth error code: token_expired",
+			want:     "auth_expired",
+		},
+		{
+			name:     "rate limit",
+			provider: "codex",
+			errMsg:   "429 Too Many Requests: rate limit exceeded",
+			want:     "rate_limit",
+		},
+		{
+			name:     "quota exceeded",
+			provider: "codex",
+			errMsg:   "insufficient_quota: billing hard limit reached",
+			want:     "quota_exceeded",
+		},
+		{
+			name:     "context length",
+			provider: "claude",
+			errMsg:   "context length exceeded: too many tokens",
+			want:     "context_limit",
+		},
+		{
+			name:     "model unavailable",
+			provider: "codex",
+			errMsg:   "model gpt-5.5-pro is not available for this account",
+			want:     "model_limit",
+		},
+		{
+			name:     "generic compile failure remains agent error",
+			provider: "codex",
+			errMsg:   "go test failed: expected nil, got error",
+			want:     "agent_error",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := classifyAgentFailure(tt.provider, tt.errMsg); got != tt.want {
+				t.Fatalf("classifyAgentFailure() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestBuildPromptFallbackContext(t *testing.T) {
+	t.Parallel()
+
+	prompt := BuildPrompt(Task{
+		IssueID:               "issue-1",
+		FallbackParentTaskID:  "task-parent",
+		FallbackSourceAgentID: "agent-dev",
+		FallbackReason:        "context_limit",
+		Agent:                 &AgentData{Name: "Sub Dev"},
+	})
+
+	for _, want := range []string{
+		"[FALLBACK CONTEXT]",
+		"Parent task ID: task-parent",
+		"Previous agent ID: agent-dev",
+		"Failure reason: context_limit",
+		"multica issue runs issue-1 --output json",
+		"multica issue run-messages task-parent --output json",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("fallback prompt missing %q\n---\n%s", want, prompt)
+		}
+	}
+}
+
 func TestBuildPromptAutopilotRunOnly(t *testing.T) {
 	t.Parallel()
 

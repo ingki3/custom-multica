@@ -28,6 +28,11 @@ export type AgentRuntime = RuntimeDevice;
 // the agent presence derivation and the UI failure-message lookup.
 export type TaskFailureReason =
   | "agent_error"
+  | "auth_expired"
+  | "rate_limit"
+  | "quota_exceeded"
+  | "context_limit"
+  | "model_limit"
   | "timeout"
   | "runtime_offline"
   | "runtime_recovery"
@@ -116,6 +121,9 @@ export interface Agent {
   status: AgentStatus;
   max_concurrent_tasks: number;
   model: string;
+  fallback_agent_id?: string | null;
+  fallback_failure_reasons?: TaskFailureReason[];
+  fallback_max_depth?: number;
   owner_id: string | null;
   skills: Skill[];
   created_at: string;
@@ -137,6 +145,9 @@ export interface CreateAgentRequest {
   visibility?: AgentVisibility;
   max_concurrent_tasks?: number;
   model?: string;
+  fallback_agent_id?: string | null;
+  fallback_failure_reasons?: TaskFailureReason[];
+  fallback_max_depth?: number;
   /** Optional template slug used by the onboarding agent picker. Surfaced
    *  as the `template` property on the `agent_created` PostHog event. */
   template?: string;
@@ -156,6 +167,9 @@ export interface UpdateAgentRequest {
   status?: AgentStatus;
   max_concurrent_tasks?: number;
   model?: string;
+  fallback_agent_id?: string | null;
+  fallback_failure_reasons?: TaskFailureReason[];
+  fallback_max_depth?: number;
 }
 
 // Skills

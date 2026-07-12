@@ -20,8 +20,9 @@ WHERE id = $1 AND workspace_id = $2;
 INSERT INTO agent (
     workspace_id, name, description, avatar_url, runtime_mode,
     runtime_config, runtime_id, visibility, max_concurrent_tasks, owner_id,
-    instructions, custom_env, custom_args, mcp_config, model
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+    instructions, custom_env, custom_args, mcp_config, model,
+    fallback_agent_id, fallback_failure_reasons, fallback_max_depth
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, sqlc.arg(fallback_agent_id), COALESCE(sqlc.arg(fallback_failure_reasons), ARRAY['context_limit', 'rate_limit', 'model_limit']::text[]), COALESCE(sqlc.arg(fallback_max_depth), 1))
 RETURNING *;
 
 -- name: UpdateAgent :one
@@ -40,7 +41,15 @@ UPDATE agent SET
     custom_args = COALESCE(sqlc.narg('custom_args'), custom_args),
     mcp_config = COALESCE(sqlc.narg('mcp_config'), mcp_config),
     model = COALESCE(sqlc.narg('model'), model),
+    fallback_agent_id = COALESCE(sqlc.narg('fallback_agent_id'), fallback_agent_id),
+    fallback_failure_reasons = COALESCE(sqlc.narg('fallback_failure_reasons'), fallback_failure_reasons),
+    fallback_max_depth = COALESCE(sqlc.narg('fallback_max_depth'), fallback_max_depth),
     updated_at = now()
+WHERE id = $1
+RETURNING *;
+
+-- name: ClearAgentFallback :one
+UPDATE agent SET fallback_agent_id = NULL, updated_at = now()
 WHERE id = $1
 RETURNING *;
 
@@ -105,6 +114,36 @@ SELECT
     p.attempt + 1, p.max_attempts, p.id
 FROM agent_task_queue p
 WHERE p.id = $1
+RETURNING *;
+
+-- name: CreateFallbackTask :one
+-- Clones a failed parent task into a fresh queued task owned by a fallback
+-- agent/runtime. The child keeps issue/chat/autopilot links plus session/workdir
+-- so the fallback agent can inspect prior context and continue safely.
+INSERT INTO agent_task_queue (
+    agent_id, runtime_id, issue_id, chat_session_id, autopilot_run_id,
+    status, priority, trigger_comment_id, trigger_summary, context,
+    session_id, work_dir,
+    attempt, max_attempts, parent_task_id
+)
+SELECT
+    sqlc.arg(fallback_agent_id), sqlc.arg(fallback_runtime_id),
+    p.issue_id, p.chat_session_id, p.autopilot_run_id,
+    'queued', p.priority, p.trigger_comment_id, p.trigger_summary,
+    jsonb_set(
+        COALESCE(p.context, '{}'::jsonb),
+        '{fallback}',
+        jsonb_build_object(
+            'from_task_id', p.id,
+            'from_agent_id', p.agent_id,
+            'reason', COALESCE(p.failure_reason, 'unknown')
+        ),
+        true
+    ),
+    p.session_id, p.work_dir,
+    1, p.max_attempts, p.id
+FROM agent_task_queue p
+WHERE p.id = sqlc.arg(parent_task_id)
 RETURNING *;
 
 -- name: CancelAgentTasksByIssue :many

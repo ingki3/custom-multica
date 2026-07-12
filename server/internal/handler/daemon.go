@@ -931,6 +931,15 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if task.Context != nil {
+		var ctx service.TaskContextWithFallback
+		if json.Unmarshal(task.Context, &ctx) == nil && ctx.Fallback != nil {
+			resp.FallbackParentTaskID = ctx.Fallback.FromTaskID
+			resp.FallbackSourceAgentID = ctx.Fallback.FromAgentID
+			resp.FallbackReason = ctx.Fallback.Reason
+		}
+	}
+
 	// Chat task: populate workspace/session info from the chat_session table.
 	if task.ChatSessionID.Valid {
 		if cs, err := h.Queries.GetChatSession(r.Context(), task.ChatSessionID); err == nil {

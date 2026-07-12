@@ -852,10 +852,13 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 
 	slog.Warn("task failed", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(task.IssueID), "error", errMsg, "failure_reason", failureReason)
 
-	// Auto-retry eligible failures (orphan, timeout, runtime_offline,
-	// runtime_recovery). The helper itself enforces attempt < max_attempts
-	// and only triggers for issue/chat tasks.
-	retried, _ := s.MaybeRetryFailedTask(ctx, task)
+	// Fallback first for limit-shaped failures, then same-agent auto-retry for
+	// infrastructure-shaped failures (orphan, timeout, runtime_offline,
+	// runtime_recovery). Both helpers only trigger for issue/chat tasks.
+	retried, _ := s.MaybeFallbackFailedTask(ctx, task)
+	if retried == nil {
+		retried, _ = s.MaybeRetryFailedTask(ctx, task)
+	}
 
 	// Skip the per-failure system comment when we'll immediately retry —
 	// the new task will surface its own status to the user, and we don't
@@ -1048,9 +1051,13 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 	retried := 0
 
 	for _, t := range tasks {
-		// Auto-retry first so the issue stays in_progress rather than
-		// flapping todo → in_progress within a tick.
-		if child, _ := s.MaybeRetryFailedTask(ctx, t); child != nil {
+		// Fallback / auto-retry first so the issue stays in_progress rather
+		// than flapping todo → in_progress within a tick.
+		child, _ := s.MaybeFallbackFailedTask(ctx, t)
+		if child == nil {
+			child, _ = s.MaybeRetryFailedTask(ctx, t)
+		}
+		if child != nil {
 			retried++
 			if t.IssueID.Valid {
 				retriedIssues[util.UUIDToString(t.IssueID)] = true

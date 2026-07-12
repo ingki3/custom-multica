@@ -27,30 +27,33 @@ import (
 const maxAgentDescriptionLength = 255
 
 type AgentResponse struct {
-	ID                 string            `json:"id"`
-	WorkspaceID        string            `json:"workspace_id"`
-	RuntimeID          string            `json:"runtime_id"`
-	Name               string            `json:"name"`
-	Description        string            `json:"description"`
-	Instructions       string            `json:"instructions"`
-	AvatarURL          *string           `json:"avatar_url"`
-	RuntimeMode        string            `json:"runtime_mode"`
-	RuntimeConfig      any               `json:"runtime_config"`
-	CustomEnv          map[string]string `json:"custom_env"`
-	CustomArgs         []string          `json:"custom_args"`
-	McpConfig          json.RawMessage   `json:"mcp_config"`
-	CustomEnvRedacted  bool              `json:"custom_env_redacted"`
-	McpConfigRedacted  bool              `json:"mcp_config_redacted"`
-	Visibility         string            `json:"visibility"`
-	Status             string            `json:"status"`
-	MaxConcurrentTasks int32             `json:"max_concurrent_tasks"`
-	Model              string            `json:"model"`
-	OwnerID            *string           `json:"owner_id"`
-	Skills             []SkillResponse   `json:"skills"`
-	CreatedAt          string            `json:"created_at"`
-	UpdatedAt          string            `json:"updated_at"`
-	ArchivedAt         *string           `json:"archived_at"`
-	ArchivedBy         *string           `json:"archived_by"`
+	ID                     string            `json:"id"`
+	WorkspaceID            string            `json:"workspace_id"`
+	RuntimeID              string            `json:"runtime_id"`
+	Name                   string            `json:"name"`
+	Description            string            `json:"description"`
+	Instructions           string            `json:"instructions"`
+	AvatarURL              *string           `json:"avatar_url"`
+	RuntimeMode            string            `json:"runtime_mode"`
+	RuntimeConfig          any               `json:"runtime_config"`
+	CustomEnv              map[string]string `json:"custom_env"`
+	CustomArgs             []string          `json:"custom_args"`
+	McpConfig              json.RawMessage   `json:"mcp_config"`
+	CustomEnvRedacted      bool              `json:"custom_env_redacted"`
+	McpConfigRedacted      bool              `json:"mcp_config_redacted"`
+	Visibility             string            `json:"visibility"`
+	Status                 string            `json:"status"`
+	MaxConcurrentTasks     int32             `json:"max_concurrent_tasks"`
+	Model                  string            `json:"model"`
+	FallbackAgentID        *string           `json:"fallback_agent_id"`
+	FallbackFailureReasons []string          `json:"fallback_failure_reasons"`
+	FallbackMaxDepth       int32             `json:"fallback_max_depth"`
+	OwnerID                *string           `json:"owner_id"`
+	Skills                 []SkillResponse   `json:"skills"`
+	CreatedAt              string            `json:"created_at"`
+	UpdatedAt              string            `json:"updated_at"`
+	ArchivedAt             *string           `json:"archived_at"`
+	ArchivedBy             *string           `json:"archived_by"`
 }
 
 func agentToResponse(a db.Agent) AgentResponse {
@@ -88,28 +91,31 @@ func agentToResponse(a db.Agent) AgentResponse {
 	}
 
 	return AgentResponse{
-		ID:                 uuidToString(a.ID),
-		WorkspaceID:        uuidToString(a.WorkspaceID),
-		RuntimeID:          uuidToString(a.RuntimeID),
-		Name:               a.Name,
-		Description:        a.Description,
-		Instructions:       a.Instructions,
-		AvatarURL:          textToPtr(a.AvatarUrl),
-		RuntimeMode:        a.RuntimeMode,
-		RuntimeConfig:      rc,
-		CustomEnv:          customEnv,
-		CustomArgs:         customArgs,
-		McpConfig:          mcpConfig,
-		Visibility:         a.Visibility,
-		Status:             a.Status,
-		MaxConcurrentTasks: a.MaxConcurrentTasks,
-		Model:              a.Model.String,
-		OwnerID:            uuidToPtr(a.OwnerID),
-		Skills:             []SkillResponse{},
-		CreatedAt:          timestampToString(a.CreatedAt),
-		UpdatedAt:          timestampToString(a.UpdatedAt),
-		ArchivedAt:         timestampToPtr(a.ArchivedAt),
-		ArchivedBy:         uuidToPtr(a.ArchivedBy),
+		ID:                     uuidToString(a.ID),
+		WorkspaceID:            uuidToString(a.WorkspaceID),
+		RuntimeID:              uuidToString(a.RuntimeID),
+		Name:                   a.Name,
+		Description:            a.Description,
+		Instructions:           a.Instructions,
+		AvatarURL:              textToPtr(a.AvatarUrl),
+		RuntimeMode:            a.RuntimeMode,
+		RuntimeConfig:          rc,
+		CustomEnv:              customEnv,
+		CustomArgs:             customArgs,
+		McpConfig:              mcpConfig,
+		Visibility:             a.Visibility,
+		Status:                 a.Status,
+		MaxConcurrentTasks:     a.MaxConcurrentTasks,
+		Model:                  a.Model.String,
+		FallbackAgentID:        uuidToPtr(a.FallbackAgentID),
+		FallbackFailureReasons: a.FallbackFailureReasons,
+		FallbackMaxDepth:       a.FallbackMaxDepth,
+		OwnerID:                uuidToPtr(a.OwnerID),
+		Skills:                 []SkillResponse{},
+		CreatedAt:              timestampToString(a.CreatedAt),
+		UpdatedAt:              timestampToString(a.UpdatedAt),
+		ArchivedAt:             timestampToPtr(a.ArchivedAt),
+		ArchivedBy:             uuidToPtr(a.ArchivedBy),
 	}
 }
 
@@ -157,6 +163,9 @@ type AgentTaskResponse struct {
 	AutopilotTriggerPayload          json.RawMessage `json:"autopilot_trigger_payload,omitempty"`           // optional trigger payload for webhook/api runs
 	QuickCreatePrompt                string          `json:"quick_create_prompt,omitempty"`                 // user's natural-language input for quick-create tasks
 	WorkingFolder                    string          `json:"working_folder,omitempty"`                      // project-level local folder override for agent workdir
+	FallbackParentTaskID             string          `json:"fallback_parent_task_id,omitempty"`             // parent task that failed and spawned this fallback
+	FallbackSourceAgentID            string          `json:"fallback_source_agent_id,omitempty"`            // original agent from the failed parent task
+	FallbackReason                   string          `json:"fallback_reason,omitempty"`                     // failure_reason that triggered fallback
 	Kind                             string          `json:"kind"`                                          // discriminator: "comment" | "autopilot" | "chat" | "quick_create" | "direct" — used by the activity row to label tasks that have no linked issue
 	RequestingUserName               string          `json:"requesting_user_name,omitempty"`                // runtime owner display name for agent brief
 	RequestingUserProfileDescription string          `json:"requesting_user_profile_description,omitempty"` // runtime owner profile description for agent brief
@@ -324,18 +333,21 @@ func (h *Handler) GetAgent(w http.ResponseWriter, r *http.Request) {
 }
 
 type CreateAgentRequest struct {
-	Name               string            `json:"name"`
-	Description        string            `json:"description"`
-	Instructions       string            `json:"instructions"`
-	AvatarURL          *string           `json:"avatar_url"`
-	RuntimeID          string            `json:"runtime_id"`
-	RuntimeConfig      any               `json:"runtime_config"`
-	CustomEnv          map[string]string `json:"custom_env"`
-	CustomArgs         []string          `json:"custom_args"`
-	McpConfig          json.RawMessage   `json:"mcp_config"`
-	Visibility         string            `json:"visibility"`
-	MaxConcurrentTasks int32             `json:"max_concurrent_tasks"`
-	Model              string            `json:"model"`
+	Name                   string            `json:"name"`
+	Description            string            `json:"description"`
+	Instructions           string            `json:"instructions"`
+	AvatarURL              *string           `json:"avatar_url"`
+	RuntimeID              string            `json:"runtime_id"`
+	RuntimeConfig          any               `json:"runtime_config"`
+	CustomEnv              map[string]string `json:"custom_env"`
+	CustomArgs             []string          `json:"custom_args"`
+	McpConfig              json.RawMessage   `json:"mcp_config"`
+	Visibility             string            `json:"visibility"`
+	MaxConcurrentTasks     int32             `json:"max_concurrent_tasks"`
+	Model                  string            `json:"model"`
+	FallbackAgentID        *string           `json:"fallback_agent_id"`
+	FallbackFailureReasons []string          `json:"fallback_failure_reasons"`
+	FallbackMaxDepth       int32             `json:"fallback_max_depth"`
 	// Template records which template slug was used to seed this agent
 	// (e.g. "coding" / "planning" / "writing" / "assistant"). Empty when
 	// the caller didn't come from a template picker — the `agent_created`
@@ -447,22 +459,50 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		mc = append([]byte(nil), rawMcpConfig...)
 	}
 
+	var fallbackAgentID pgtype.UUID
+	if req.FallbackAgentID != nil && *req.FallbackAgentID != "" {
+		parsed, ok := parseUUIDOrBadRequest(w, *req.FallbackAgentID, "fallback_agent_id")
+		if !ok {
+			return
+		}
+		fallback, err := h.Queries.GetAgentInWorkspace(r.Context(), db.GetAgentInWorkspaceParams{
+			ID:          parsed,
+			WorkspaceID: wsUUID,
+		})
+		if err != nil || fallback.ArchivedAt.Valid {
+			writeError(w, http.StatusBadRequest, "invalid fallback_agent_id")
+			return
+		}
+		fallbackAgentID = parsed
+	}
+	var fallbackFailureReasons any
+	if req.FallbackFailureReasons != nil {
+		fallbackFailureReasons = req.FallbackFailureReasons
+	}
+	var fallbackMaxDepth any
+	if req.FallbackMaxDepth > 0 {
+		fallbackMaxDepth = req.FallbackMaxDepth
+	}
+
 	agent, err := h.Queries.CreateAgent(r.Context(), db.CreateAgentParams{
-		WorkspaceID:        wsUUID,
-		Name:               req.Name,
-		Description:        req.Description,
-		Instructions:       req.Instructions,
-		AvatarUrl:          ptrToText(req.AvatarURL),
-		RuntimeMode:        runtime.RuntimeMode,
-		RuntimeConfig:      rc,
-		RuntimeID:          runtime.ID,
-		Visibility:         req.Visibility,
-		MaxConcurrentTasks: req.MaxConcurrentTasks,
-		OwnerID:            parseUUID(ownerID),
-		CustomEnv:          ce,
-		CustomArgs:         ca,
-		McpConfig:          mc,
-		Model:              pgtype.Text{String: req.Model, Valid: req.Model != ""},
+		WorkspaceID:            wsUUID,
+		Name:                   req.Name,
+		Description:            req.Description,
+		Instructions:           req.Instructions,
+		AvatarUrl:              ptrToText(req.AvatarURL),
+		RuntimeMode:            runtime.RuntimeMode,
+		RuntimeConfig:          rc,
+		RuntimeID:              runtime.ID,
+		Visibility:             req.Visibility,
+		MaxConcurrentTasks:     req.MaxConcurrentTasks,
+		OwnerID:                parseUUID(ownerID),
+		CustomEnv:              ce,
+		CustomArgs:             ca,
+		McpConfig:              mc,
+		Model:                  pgtype.Text{String: req.Model, Valid: req.Model != ""},
+		FallbackAgentID:        fallbackAgentID,
+		FallbackFailureReasons: fallbackFailureReasons,
+		FallbackMaxDepth:       fallbackMaxDepth,
 	})
 	if err != nil {
 		// Unique constraint on (workspace_id, name) — return a clear conflict error
@@ -500,19 +540,22 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 }
 
 type UpdateAgentRequest struct {
-	Name               *string            `json:"name"`
-	Description        *string            `json:"description"`
-	Instructions       *string            `json:"instructions"`
-	AvatarURL          *string            `json:"avatar_url"`
-	RuntimeID          *string            `json:"runtime_id"`
-	RuntimeConfig      any                `json:"runtime_config"`
-	CustomEnv          *map[string]string `json:"custom_env"`
-	CustomArgs         *[]string          `json:"custom_args"`
-	McpConfig          *json.RawMessage   `json:"mcp_config"`
-	Visibility         *string            `json:"visibility"`
-	Status             *string            `json:"status"`
-	MaxConcurrentTasks *int32             `json:"max_concurrent_tasks"`
-	Model              *string            `json:"model"`
+	Name                   *string            `json:"name"`
+	Description            *string            `json:"description"`
+	Instructions           *string            `json:"instructions"`
+	AvatarURL              *string            `json:"avatar_url"`
+	RuntimeID              *string            `json:"runtime_id"`
+	RuntimeConfig          any                `json:"runtime_config"`
+	CustomEnv              *map[string]string `json:"custom_env"`
+	CustomArgs             *[]string          `json:"custom_args"`
+	McpConfig              *json.RawMessage   `json:"mcp_config"`
+	Visibility             *string            `json:"visibility"`
+	Status                 *string            `json:"status"`
+	MaxConcurrentTasks     *int32             `json:"max_concurrent_tasks"`
+	Model                  *string            `json:"model"`
+	FallbackAgentID        *string            `json:"fallback_agent_id"`
+	FallbackFailureReasons *[]string          `json:"fallback_failure_reasons"`
+	FallbackMaxDepth       *int32             `json:"fallback_max_depth"`
 }
 
 // canViewAgentEnv checks whether the requesting user is allowed to see the
@@ -646,6 +689,33 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	if req.Model != nil {
 		params.Model = pgtype.Text{String: *req.Model, Valid: true}
 	}
+	rawFallbackAgentID, hasFallbackAgentID := rawFields["fallback_agent_id"]
+	shouldClearFallbackAgentID := hasFallbackAgentID && bytes.Equal(bytes.TrimSpace(rawFallbackAgentID), []byte("null"))
+	if hasFallbackAgentID && !shouldClearFallbackAgentID && req.FallbackAgentID != nil && *req.FallbackAgentID != "" {
+		fallbackUUID, ok := parseUUIDOrBadRequest(w, *req.FallbackAgentID, "fallback_agent_id")
+		if !ok {
+			return
+		}
+		if uuidToString(fallbackUUID) == uuidToString(agent.ID) {
+			writeError(w, http.StatusBadRequest, "fallback_agent_id cannot reference the same agent")
+			return
+		}
+		fallback, err := h.Queries.GetAgentInWorkspace(r.Context(), db.GetAgentInWorkspaceParams{
+			ID:          fallbackUUID,
+			WorkspaceID: agent.WorkspaceID,
+		})
+		if err != nil || fallback.ArchivedAt.Valid {
+			writeError(w, http.StatusBadRequest, "invalid fallback_agent_id")
+			return
+		}
+		params.FallbackAgentID = fallbackUUID
+	}
+	if req.FallbackFailureReasons != nil {
+		params.FallbackFailureReasons = *req.FallbackFailureReasons
+	}
+	if req.FallbackMaxDepth != nil {
+		params.FallbackMaxDepth = pgtype.Int4{Int32: *req.FallbackMaxDepth, Valid: true}
+	}
 
 	agent, err = h.Queries.UpdateAgent(r.Context(), params)
 	if err != nil {
@@ -661,6 +731,14 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			slog.Warn("clear agent mcp_config failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
 			writeError(w, http.StatusInternalServerError, "failed to clear mcp_config: "+err.Error())
+			return
+		}
+	}
+	if shouldClearFallbackAgentID {
+		agent, err = h.Queries.ClearAgentFallback(r.Context(), agent.ID)
+		if err != nil {
+			slog.Warn("clear agent fallback failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
+			writeError(w, http.StatusInternalServerError, "failed to clear fallback_agent_id: "+err.Error())
 			return
 		}
 	}

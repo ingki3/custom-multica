@@ -20,27 +20,30 @@ type ActivityLog struct {
 }
 
 type Agent struct {
-	ID                 pgtype.UUID        `json:"id"`
-	WorkspaceID        pgtype.UUID        `json:"workspace_id"`
-	Name               string             `json:"name"`
-	AvatarUrl          pgtype.Text        `json:"avatar_url"`
-	RuntimeMode        string             `json:"runtime_mode"`
-	RuntimeConfig      []byte             `json:"runtime_config"`
-	Visibility         string             `json:"visibility"`
-	Status             string             `json:"status"`
-	MaxConcurrentTasks int32              `json:"max_concurrent_tasks"`
-	OwnerID            pgtype.UUID        `json:"owner_id"`
-	CreatedAt          pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
-	Description        string             `json:"description"`
-	RuntimeID          pgtype.UUID        `json:"runtime_id"`
-	Instructions       string             `json:"instructions"`
-	ArchivedAt         pgtype.Timestamptz `json:"archived_at"`
-	ArchivedBy         pgtype.UUID        `json:"archived_by"`
-	CustomEnv          []byte             `json:"custom_env"`
-	CustomArgs         []byte             `json:"custom_args"`
-	McpConfig          []byte             `json:"mcp_config"`
-	Model              pgtype.Text        `json:"model"`
+	ID                     pgtype.UUID        `json:"id"`
+	WorkspaceID            pgtype.UUID        `json:"workspace_id"`
+	Name                   string             `json:"name"`
+	AvatarUrl              pgtype.Text        `json:"avatar_url"`
+	RuntimeMode            string             `json:"runtime_mode"`
+	RuntimeConfig          []byte             `json:"runtime_config"`
+	Visibility             string             `json:"visibility"`
+	Status                 string             `json:"status"`
+	MaxConcurrentTasks     int32              `json:"max_concurrent_tasks"`
+	OwnerID                pgtype.UUID        `json:"owner_id"`
+	CreatedAt              pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt              pgtype.Timestamptz `json:"updated_at"`
+	Description            string             `json:"description"`
+	RuntimeID              pgtype.UUID        `json:"runtime_id"`
+	Instructions           string             `json:"instructions"`
+	ArchivedAt             pgtype.Timestamptz `json:"archived_at"`
+	ArchivedBy             pgtype.UUID        `json:"archived_by"`
+	CustomEnv              []byte             `json:"custom_env"`
+	CustomArgs             []byte             `json:"custom_args"`
+	McpConfig              []byte             `json:"mcp_config"`
+	Model                  pgtype.Text        `json:"model"`
+	FallbackAgentID        pgtype.UUID        `json:"fallback_agent_id"`
+	FallbackFailureReasons []string           `json:"fallback_failure_reasons"`
+	FallbackMaxDepth       int32              `json:"fallback_max_depth"`
 }
 
 type AgentMcpServer struct {

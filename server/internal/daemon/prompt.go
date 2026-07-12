@@ -26,8 +26,30 @@ func BuildPrompt(task Task) string {
 	var b strings.Builder
 	b.WriteString("You are running as a local coding agent for a Multica workspace.\n\n")
 	fmt.Fprintf(&b, "Your assigned issue ID is: %s\n\n", task.IssueID)
+	writeFallbackContext(&b, task)
 	fmt.Fprintf(&b, "Start by running `multica issue get %s --output json` to understand your task, then complete it.\n", task.IssueID)
 	return b.String()
+}
+
+func writeFallbackContext(b *strings.Builder, task Task) {
+	if task.FallbackParentTaskID == "" {
+		return
+	}
+	b.WriteString("[FALLBACK CONTEXT]\n")
+	b.WriteString("This task was created because a previous agent run failed. Continue from the last useful state; do not repeat completed work unless verification requires it.\n")
+	fmt.Fprintf(b, "Parent task ID: %s\n", task.FallbackParentTaskID)
+	if task.FallbackSourceAgentID != "" {
+		fmt.Fprintf(b, "Previous agent ID: %s\n", task.FallbackSourceAgentID)
+	}
+	if task.FallbackReason != "" {
+		fmt.Fprintf(b, "Failure reason: %s\n", task.FallbackReason)
+	}
+	b.WriteString("Before changing code, inspect the issue and prior run messages:\n")
+	if task.IssueID != "" {
+		fmt.Fprintf(b, "  multica issue get %s --output json\n", task.IssueID)
+		fmt.Fprintf(b, "  multica issue runs %s --output json\n", task.IssueID)
+	}
+	fmt.Fprintf(b, "  multica issue run-messages %s --output json\n\n", task.FallbackParentTaskID)
 }
 
 // buildQuickCreatePrompt constructs a prompt for quick-create tasks. The
@@ -92,6 +114,7 @@ func buildCommentPrompt(task Task) string {
 			b.WriteString("⚠️ The triggering comment was posted by another agent. Decide whether a reply is warranted. If you produced actual work this turn (investigated, fixed something, answered a real question), post the result as a normal reply — that is NOT a noise comment, and the standard rule that final results must be delivered via comment still applies. If the triggering comment was a pure acknowledgment, thanks, or sign-off AND you produced no work this turn, do NOT reply — and do NOT post a comment saying 'No reply needed' or similar. Simply exit with no output. Silence is the preferred way to end agent-to-agent threads. If you do reply, do not @mention the other agent as a sign-off (that re-triggers them and starts a loop).\n\n")
 		}
 	}
+	writeFallbackContext(&b, task)
 	fmt.Fprintf(&b, "Start by running `multica issue get %s --output json` to understand your task, then decide how to proceed.\n\n", task.IssueID)
 	b.WriteString(execenv.BuildCommentReplyInstructions(task.IssueID, task.TriggerCommentID))
 	return b.String()
