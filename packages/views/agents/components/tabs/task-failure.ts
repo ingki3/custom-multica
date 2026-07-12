@@ -9,6 +9,11 @@ import type { TaskFailureReason } from "@multica/core/types";
 // is purely a detail-page concern now.
 export const failureReasonLabel: Record<TaskFailureReason, string> = {
   agent_error: "Agent execution error",
+  auth_expired: "Authentication expired",
+  rate_limit: "Rate limited",
+  quota_exceeded: "Quota exceeded",
+  context_limit: "Context limit reached",
+  model_limit: "Model unavailable",
   timeout: "Task timed out",
   runtime_offline: "Daemon offline",
   runtime_recovery: "Daemon restarted",

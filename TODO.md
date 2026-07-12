@@ -2,6 +2,7 @@
 
 ## Completed
 
+- [x] **Dev Agent → Sub Dev Agent fallback** — `failure_reason` taxonomy를 확장해 Codex auth/token 만료, rate/quota/context/model limit을 분류하고, agent별 fallback policy(`fallback_agent_id`, `fallback_failure_reasons`, `fallback_max_depth`)로 허용된 실패에서 fallback task를 생성하도록 구현. Same-provider `auth_expired`/`quota_exceeded` fallback 차단, fallback lineage/prompt/manual/타입/회귀 테스트 추가. 구현 계획: `.hermes/plans/2026-07-12_122032-dev-agent-fallback.md`.
 - [x] **Claude 런타임 모델 목록 최신화** — Claude Code 2.1.185의 `claude models` 출력 기준으로 `claude-fable-5`(Claude Fable 5)와 `claude-opus-4-8`(Claude Opus 4.8)을 Claude runtime static catalog에 추가하고 Sonnet 4.6 기본값은 유지. Opus 4.8 비용 추정 매핑과 회귀 테스트를 추가했으며, 로컬 CLI 빌드/설치 및 데몬 재시작 후 `/api/runtimes/{claude}/models` 결과에 Fable 5/Opus 4.8/Sonnet 4.6이 표시되는 것을 확인.
 - [x] **Antigravity `agy` 런타임 자동 감지** — `agy` provider를 추가해 데몬 `LoadConfig`가 `MULTICA_AGY_PATH`/`MULTICA_AGY_MODEL`을 읽고 PATH의 `agy` CLI를 런타임으로 등록하도록 구현. `agy --print` 기반 실행 backend, `agy models` 기반 동적 모델 조회, launch header, 회귀 테스트를 추가. 지원 CLI/환경변수 문서와 provider matrix를 12개 도구 기준으로 갱신하고, 로컬 `/opt/homebrew/bin/multica` 바이너리를 새 빌드로 교체한 뒤 데몬을 재시작해 status에 `agy`가 표시되는 것을 확인.
 - [x] **Antigravity Planning Agent task-scoped auth token 정식 수정** — Migration 073으로 `task_token` 테이블 추가, sqlc query/generated code 추가, `mat_` task token 생성 helper 추가. daemon task claim 응답에 `auth_token`을 mint/persist/반환하고, middleware에서 `mat_` 토큰을 agent/task/workspace actor header로 인증하도록 구현. task 완료/실패/취소 시 token revoke를 추가하고, claim/auth 회귀 테스트 및 targeted backend tests를 통과.
@@ -17,6 +18,7 @@
 - [x] **프로젝트별 Working Folder 설정** — `project` 테이블에 `working_folder TEXT` 컬럼 추가 (migration 064). sqlc 쿼리 및 Go 핸들러에 working_folder CRUD 반영. ClaimTask 응답에 project의 working_folder 전달. 데몬의 runTask에 3단계 WorkDir 우선순위 (WorkingFolder > PriorWorkDir > Prepare). `execenv.ReuseCustomFolder()` 함수 추가 (폴더 존재/쓰기 검증, context 파일만 주입, GC 자동 제외). 기존 CLAUDE.md 보존 로직 (`RuntimeConfigFilename()` 헬퍼). 프론트엔드 타입/생성 모달/상세 사이드바에 Working Folder 필드 추가.
 
 ## Backlog
+
 
 - [ ] **[Upstream Sync] 안정성 → 데이터 보존 → Cursor managed MCP → workspace repo registry 순차 반영** — 코드 레벨 검토 결과는 `docs/upstream-sync-candidates-2026-06-13.md`에 저장. 1차 안정성 후보 중 daemon workdir provisioning race(`9439a85aa`), stale resume session drop(`8151f60c6`), ACP stale session clear(`6acca84c2`), Codex cached input usage normalization(`5b7eb9ad2`), setup self-host `MULTICA_SERVER_URL` 반영(`42251b42f`)을 `feat/upstream-stability-sync`에서 포팅 완료하고 targeted Go tests 통과. 2차 데이터 보존 후보: attachment `markdown_url` 계열, issue description flush, create/quick-create attachment binding, chat stop/send recovery. 3차 Cursor managed MCP(`f415099c4`). 4차 workspace repo registry CLI/API(`7db3e507d`). broad merge 금지, 기능 단위 수동 포팅 우선.
 - [x] **Working Folder 동시 접근 정책** — 같은 프로젝트에 여러 에이전트가 동시에 할당되면 같은 폴더에서 작업하게 됨. 하이브리드 정책 구현: git 레포인 경우 `.multica_worktrees/{taskID}/`에 per-task worktree 자동 생성으로 격리, non-git 폴더인 경우 태스크를 큐로 되돌려 직렬화. 데몬 내 `workingFolderTasks map[string]int`로 폴더별 활성 태스크 수 추적. `RequeueTask` API 엔드포인트 추가. 단일 태스크 시 기존 동작 변경 없음.
