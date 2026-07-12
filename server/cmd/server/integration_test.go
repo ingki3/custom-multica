@@ -832,6 +832,35 @@ func TestInvalidRequestBodies(t *testing.T) {
 	}
 }
 
+func readWebSocketMessageOfType(t *testing.T, conn *websocket.Conn, wantType string) map[string]any {
+	t.Helper()
+
+	deadline := time.Now().Add(3 * time.Second)
+	var seen []string
+	for time.Now().Before(deadline) {
+		conn.SetReadDeadline(deadline)
+		_, msg, err := conn.ReadMessage()
+		if err != nil {
+			t.Fatalf("WebSocket read error while waiting for %s after seeing %v: %v", wantType, seen, err)
+		}
+
+		var wsMsg map[string]any
+		if err := json.Unmarshal(msg, &wsMsg); err != nil {
+			t.Fatalf("failed to parse WebSocket message while waiting for %s: %v", wantType, err)
+		}
+
+		msgType, _ := wsMsg["type"].(string)
+		if msgType == wantType {
+			conn.SetReadDeadline(time.Time{})
+			return wsMsg
+		}
+		seen = append(seen, msgType)
+	}
+
+	t.Fatalf("timed out waiting for WebSocket message type %s after seeing %v", wantType, seen)
+	return nil
+}
+
 // ---- WebSocket integration through full router ----
 
 func TestWebSocketIntegration(t *testing.T) {
@@ -875,21 +904,11 @@ func TestWebSocketIntegration(t *testing.T) {
 	readJSON(t, resp, &issue)
 	issueID := issue["id"].(string)
 
-	// Read the WebSocket message
-	conn.SetReadDeadline(time.Now().Add(3 * time.Second))
-	_, msg, err := conn.ReadMessage()
-	if err != nil {
-		t.Fatalf("WebSocket read error: %v", err)
-	}
-
-	// Verify the message contains the issue event
-	var wsMsg map[string]any
-	if err := json.Unmarshal(msg, &wsMsg); err != nil {
-		t.Fatalf("failed to parse WebSocket message: %v", err)
-	}
-	if wsMsg["type"] != "issue:created" {
-		t.Fatalf("expected type 'issue:created', got '%s'", wsMsg["type"])
-	}
+	// Verify the message contains the issue event. Issue mutations can emit
+	// secondary domain events (for example issue.status_changed), so read until
+	// the event under test is observed instead of assuming every broadcast has a
+	// globally stable order.
+	readWebSocketMessageOfType(t, conn, "issue:created")
 
 	// Update the issue — should trigger another broadcast
 	resp = authRequest(t, "PUT", "/api/issues/"+issueID, map[string]any{
@@ -897,29 +916,11 @@ func TestWebSocketIntegration(t *testing.T) {
 	})
 	resp.Body.Close()
 
-	conn.SetReadDeadline(time.Now().Add(3 * time.Second))
-	_, msg, err = conn.ReadMessage()
-	if err != nil {
-		t.Fatalf("WebSocket read error on update: %v", err)
-	}
-	var updateMsg map[string]any
-	json.Unmarshal(msg, &updateMsg)
-	if updateMsg["type"] != "issue:updated" {
-		t.Fatalf("expected type 'issue:updated', got '%s'", updateMsg["type"])
-	}
+	readWebSocketMessageOfType(t, conn, "issue:updated")
 
 	// Delete the issue — should trigger another broadcast
 	resp = authRequest(t, "DELETE", "/api/issues/"+issueID, nil)
 	resp.Body.Close()
 
-	conn.SetReadDeadline(time.Now().Add(3 * time.Second))
-	_, msg, err = conn.ReadMessage()
-	if err != nil {
-		t.Fatalf("WebSocket read error on delete: %v", err)
-	}
-	var deleteMsg map[string]any
-	json.Unmarshal(msg, &deleteMsg)
-	if deleteMsg["type"] != "issue:deleted" {
-		t.Fatalf("expected type 'issue:deleted', got '%s'", deleteMsg["type"])
-	}
+	readWebSocketMessageOfType(t, conn, "issue:deleted")
 }
