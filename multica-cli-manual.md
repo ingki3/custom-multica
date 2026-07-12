@@ -575,6 +575,12 @@ multica agent restore <agent-id>
 multica agent tasks <agent-id> --output json
 ```
 
+Codex model discovery notes:
+
+- Daemons running Codex CLI 0.122.0 or newer discover the installed bundled model and reasoning-effort catalog dynamically with `codex debug models --bundled`.
+- Older, missing, offline, or malformed Codex installations fall back to Multica's verified static catalog, including GPT-5.6 Sol/Terra/Luna.
+- The model-list API can include optional `thinking.supported_levels` and `thinking.default_level` metadata. This metadata is informational until the local fork adds persisted per-agent `thinking_level` configuration.
+
 Skills assigned to agents:
 
 ```bash

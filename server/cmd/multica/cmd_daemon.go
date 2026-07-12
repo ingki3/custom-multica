@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/exec"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	lumberjack "gopkg.in/natefinch/lumberjack.v2"
 
 	"github.com/multica-ai/multica/server/internal/cli"
 	"github.com/multica-ai/multica/server/internal/daemon"
@@ -110,6 +112,51 @@ func daemonLogPathForProfile(profile string) string {
 	return filepath.Join(daemonDirForProfile(profile), "daemon.log")
 }
 
+func daemonStderrLogPathForProfile(profile string) string {
+	return filepath.Join(daemonDirForProfile(profile), "daemon.err.log")
+}
+
+const (
+	defaultDaemonLogMaxSizeMB  = 20
+	defaultDaemonLogMaxBackups = 5
+	defaultDaemonLogMaxAgeDays = 30
+	errLogMaxBytes             = 5 * 1024 * 1024
+)
+
+func newDaemonLogRotator(logPath string) *lumberjack.Logger {
+	return &lumberjack.Logger{
+		Filename:   logPath,
+		MaxSize:    envPositiveIntOrDefault("MULTICA_DAEMON_LOG_MAX_SIZE_MB", defaultDaemonLogMaxSizeMB),
+		MaxBackups: envPositiveIntOrDefault("MULTICA_DAEMON_LOG_MAX_BACKUPS", defaultDaemonLogMaxBackups),
+		MaxAge:     envPositiveIntOrDefault("MULTICA_DAEMON_LOG_MAX_AGE_DAYS", defaultDaemonLogMaxAgeDays),
+		Compress:   true,
+	}
+}
+
+func envPositiveIntOrDefault(key string, fallback int) int {
+	value := strings.TrimSpace(os.Getenv(key))
+	parsed, err := strconv.Atoi(value)
+	if value == "" || err != nil || parsed <= 0 {
+		return fallback
+	}
+	return parsed
+}
+
+func openBoundedErrLog(path string) (*os.File, error) {
+	if info, err := os.Stat(path); err == nil && info.Size() >= errLogMaxBytes {
+		backup := path + ".1"
+		if err := os.Remove(backup); err != nil && !os.IsNotExist(err) {
+			return nil, fmt.Errorf("remove old stderr log backup: %w", err)
+		}
+		if err := os.Rename(path, backup); err != nil {
+			return nil, fmt.Errorf("rotate stderr log: %w", err)
+		}
+	} else if err != nil && !os.IsNotExist(err) {
+		return nil, fmt.Errorf("stat stderr log: %w", err)
+	}
+	return os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+}
+
 // healthPortForProfile returns the health check port for the given profile.
 // Default profile uses the standard port (19514). Named profiles get a
 // deterministic offset derived from the profile name.
@@ -167,11 +214,12 @@ func runDaemonBackground(cmd *cobra.Command) error {
 		return fmt.Errorf("create daemon directory: %w", err)
 	}
 
-	logPath := daemonLogPathForProfile(profile)
-	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	errLogPath := daemonStderrLogPathForProfile(profile)
+	logFile, err := openBoundedErrLog(errLogPath)
 	if err != nil {
-		return fmt.Errorf("open log file %s: %w", logPath, err)
+		return fmt.Errorf("open log file %s: %w", errLogPath, err)
 	}
+	logPath := daemonLogPathForProfile(profile)
 
 	child := exec.Command(exePath, args...)
 	child.Stdout = logFile
@@ -281,6 +329,21 @@ func buildDaemonStartArgs(cmd *cobra.Command) []string {
 
 func runDaemonForeground(cmd *cobra.Command) error {
 	profile := resolveProfile(cmd)
+	if err := os.MkdirAll(daemonDirForProfile(profile), 0o755); err != nil {
+		return fmt.Errorf("create daemon directory: %w", err)
+	}
+
+	var (
+		logger     *slog.Logger
+		logRotator *lumberjack.Logger
+	)
+	if logger_pkg.StderrIsTerminal() {
+		logger = logger_pkg.NewLogger("daemon")
+	} else {
+		logRotator = newDaemonLogRotator(daemonLogPathForProfile(profile))
+		defer logRotator.Close()
+		logger = logger_pkg.NewWriterLoggerDefault("daemon", logRotator)
+	}
 
 	serverURL := cli.FlagOrEnv(cmd, "server-url", "MULTICA_SERVER_URL", "")
 	if serverURL == "" {
@@ -324,7 +387,6 @@ func runDaemonForeground(cmd *cobra.Command) error {
 	ctx, stop := notifyShutdownContext(context.Background())
 	defer stop()
 
-	logger := logger_pkg.NewLogger("daemon")
 	d := daemon.New(cfg, logger)
 
 	// Write PID file so "daemon stop" can find us.
@@ -341,12 +403,16 @@ func runDaemonForeground(cmd *cobra.Command) error {
 	// Check if the daemon needs to restart after a CLI update.
 	if restartBin := d.RestartBinary(); restartBin != "" {
 		logger.Info("restarting daemon with updated binary", "path", restartBin)
+		if logRotator != nil {
+			logger = logger_pkg.NewWriterLoggerDefault("daemon", os.Stderr)
+			_ = logRotator.Close()
+		}
 
 		args := buildDaemonStartArgs(cmd)
 		child := exec.Command(restartBin, args...)
 
-		logPath := daemonLogPathForProfile(profile)
-		logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+		errLogPath := daemonStderrLogPathForProfile(profile)
+		logFile, err := openBoundedErrLog(errLogPath)
 		if err != nil {
 			logger.Error("failed to open log file for restart", "error", err)
 			return nil

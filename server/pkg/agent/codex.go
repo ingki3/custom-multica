@@ -213,7 +213,21 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 			b.cfg.Logger.Info("codex thread started", "thread_id", threadID)
 		}
 
-		// 3. Send turn and wait for completion
+		// 3. Send turn and wait for completion. Codex may emit turn/completed
+		// and close stdout before replying to turn/start; prefer the completed
+		// notification over the synthetic EOF error in that race.
+		finishTurn := func(aborted bool) {
+			if aborted {
+				finalStatus = "aborted"
+				finalError = "turn was aborted"
+				return
+			}
+			if errMsg := c.getTurnError(); errMsg != "" {
+				finalStatus = "failed"
+				finalError = errMsg
+			}
+		}
+		turnCompletedBeforeResponse := false
 		_, err = c.request(runCtx, "turn/start", map[string]any{
 			"threadId": threadID,
 			"input": []map[string]any{
@@ -221,11 +235,17 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 			},
 		})
 		if err != nil {
-			drainAndWait() // flush os/exec stderr goroutine before sampling Tail
-			finalStatus = "failed"
-			finalError = withAgentStderr(fmt.Sprintf("codex turn/start failed: %v", err), "codex", stderrBuf.Tail())
-			resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
-			return
+			select {
+			case aborted := <-turnDone:
+				finishTurn(aborted)
+				turnCompletedBeforeResponse = true
+			default:
+				drainAndWait() // flush os/exec stderr goroutine before sampling Tail
+				finalStatus = "failed"
+				finalError = withAgentStderr(fmt.Sprintf("codex turn/start failed: %v", err), "codex", stderrBuf.Tail())
+				resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
+				return
+			}
 		}
 
 		lastSemanticActivity := time.Now()
@@ -233,21 +253,12 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		semanticTimer := time.NewTimer(semanticInactivityTimeout)
 		defer semanticTimer.Stop()
 
-		waitingForTurn := true
+		waitingForTurn := !turnCompletedBeforeResponse
 		for waitingForTurn {
 			select {
 			case aborted := <-turnDone:
 				waitingForTurn = false
-				switch {
-				case aborted:
-					finalStatus = "aborted"
-					finalError = "turn was aborted"
-				default:
-					if errMsg := c.getTurnError(); errMsg != "" {
-						finalStatus = "failed"
-						finalError = errMsg
-					}
-				}
+				finishTurn(aborted)
 			case activity := <-semanticActivityCh:
 				lastSemanticActivity = time.Now()
 				lastSemanticActivityDescription = activity
