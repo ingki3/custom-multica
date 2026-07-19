@@ -101,6 +101,12 @@ For the difference between token types, see [Authentication and tokens](/auth-to
 | `multica runtime ping <id>` | Ping a runtime to check it's online |
 | `multica runtime update <id> ...` | Update a runtime's configuration |
 
+### Runtime model catalog
+
+The daemon keeps the selectable runtime model catalog in an editable JSON text file. It creates `~/.multica/runtime-models.json` on the first model-list request; named CLI profiles use `~/.multica/profiles/<profile>/runtime-models.json`. Set `MULTICA_RUNTIME_MODELS_CONFIG` to an absolute path to use a different file.
+
+The file is read and validated for every model-list request, so edits appear in the agent settings UI without rebuilding Multica or restarting the daemon. Each provider has a `models` array whose entries require `id` and `label` and may include `provider`, `default`, and `thinking` metadata. Invalid JSON, duplicate IDs, multiple defaults, or an unsupported default thinking level are reported as a model-list error instead of silently using stale values.
+
 ## Miscellaneous
 
 | Command | Purpose |

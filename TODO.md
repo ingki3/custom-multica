@@ -19,6 +19,7 @@
 
 ## Backlog
 
+- [x] **런타임 지원 모델 외부 config 관리** — 현재 설치된 runtime CLI가 지원하는 모델을 재확인해 별도 JSON 텍스트 config로 관리하고, runtime 모델 목록을 설정/조회할 때마다 파일을 다시 읽어 daemon 재시작이나 바이너리 재빌드 없이 변경사항이 반영되도록 구현. config 경로 override, 기본 파일 생성, 검증 및 hot-reload 회귀 테스트와 운영 문서를 포함. (`feat/runtime-model-config`)
 
 - [ ] **[Upstream Release Review 2026-07-12] v0.3.34~v0.3.43 및 upstream/main 후속 커밋 수동 포팅 후보 정리** — GitHub Releases(`https://github.com/multica-ai/multica/releases`) 기준 최신 릴리즈 `v0.3.43`, fetch 기준 upstream 위치 `v0.3.43-27-g3bd69bdaa`까지 확인. 현재 fork `dev`는 `02d12797a`이며, 로컬 WIP(`server/pkg/agent/models.go`, `server/pkg/agent/models_test.go`, `.hermes/`)가 있어 broad merge 금지. 아래 후보는 **기능 단위 수동 포팅**으로 진행하고, migration 번호는 fork 흐름에 맞게 재채번한다.
   - **포팅 원칙**:

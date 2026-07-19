@@ -41,7 +41,10 @@ export function ModelDropdown({
   );
 
   const supported = modelsQuery.data?.supported ?? true;
-  const models = modelsQuery.data?.models ?? [];
+  const models = useMemo(
+    () => modelsQuery.data?.models ?? [],
+    [modelsQuery.data],
+  );
   const defaultModel = useMemo(() => models.find((m) => m.default), [models]);
   const grouped = useMemo(() => groupByProvider(models), [models]);
 
@@ -79,6 +82,13 @@ export function ModelDropdown({
     onChange(id);
     setOpen(false);
     setSearch("");
+  };
+
+  const handleOpenChange = (nextOpen: boolean) => {
+    setOpen(nextOpen);
+    if (nextOpen && runtimeOnline && runtimeId) {
+      void modelsQuery.refetch();
+    }
   };
 
   const triggerLabel =
@@ -120,7 +130,7 @@ export function ModelDropdown({
           <span className="text-xs text-muted-foreground">discovery failed</span>
         )}
       </div>
-      <Popover open={open} onOpenChange={setOpen}>
+      <Popover open={open} onOpenChange={handleOpenChange}>
         <PopoverTrigger
           disabled={disabled}
           className="flex w-full min-w-0 items-center gap-3 rounded-lg border border-border bg-background px-3 py-2.5 mt-1.5 text-left text-sm transition-colors hover:bg-muted disabled:pointer-events-none disabled:opacity-50"

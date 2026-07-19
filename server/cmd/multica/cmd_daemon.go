@@ -329,6 +329,11 @@ func buildDaemonStartArgs(cmd *cobra.Command) []string {
 
 func runDaemonForeground(cmd *cobra.Command) error {
 	profile := resolveProfile(cmd)
+	if profile == "" {
+		_ = os.Unsetenv("MULTICA_PROFILE")
+	} else if err := os.Setenv("MULTICA_PROFILE", profile); err != nil {
+		return fmt.Errorf("set daemon profile environment: %w", err)
+	}
 	if err := os.MkdirAll(daemonDirForProfile(profile), 0o755); err != nil {
 		return fmt.Errorf("create daemon directory: %w", err)
 	}

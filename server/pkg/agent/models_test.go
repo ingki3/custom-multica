@@ -2,11 +2,24 @@ package agent
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
 
+func useDefaultRuntimeModelsConfig(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), runtimeModelsConfigName)
+	if err := os.WriteFile(path, defaultRuntimeModelsConfig, 0o644); err != nil {
+		t.Fatalf("write default runtime models config: %v", err)
+	}
+	t.Setenv(runtimeModelsConfigEnv, path)
+	return path
+}
+
 func TestListModelsStaticProviders(t *testing.T) {
+	useDefaultRuntimeModelsConfig(t)
 	ctx := context.Background()
 	for _, provider := range []string{"claude", "codex", "gemini", "cursor", "copilot"} {
 		got, err := ListModels(ctx, provider, "")
@@ -69,9 +82,9 @@ func TestGeminiStaticModelsExposesAliasesAndGemini3(t *testing.T) {
 		ids[m.ID] = m
 	}
 	for _, want := range []string{
-		"auto", "auto-gemini-2.5",
+		"auto",
 		"pro", "flash", "flash-lite",
-		"gemini-3-pro-preview", "gemini-3-flash-preview",
+		"gemini-3.1-pro-preview", "gemini-3-flash-preview",
 		"gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite",
 	} {
 		if _, ok := ids[want]; !ok {
@@ -104,12 +117,9 @@ func TestCodexStaticModelsExposeCurrentCodexModels(t *testing.T) {
 		"gpt-5.6-terra",
 		"gpt-5.6-luna",
 		"gpt-5.5",
-		"gpt-5.5-pro",
 		"gpt-5.4",
 		"gpt-5.4-mini",
-		"gpt-5.4-nano",
-		"gpt-5.3-codex",
-		"gpt-5.2-codex",
+		"gpt-5.2",
 	} {
 		if _, ok := ids[want]; !ok {
 			t.Errorf("missing expected Codex model %q in: %+v", want, models)
@@ -123,16 +133,9 @@ func TestCodexStaticModelsExposeCurrentCodexModels(t *testing.T) {
 	}
 }
 
-func TestListModelsHermesWithoutBinary(t *testing.T) {
-	// With no `hermes` binary on PATH the discovery fast-paths to
-	// an empty list (the UI then falls back to creatable manual
-	// entry). This test only verifies the fast-path; an actual
-	// ACP session is exercised in integration.
+func TestListModelsHermesDoesNotDependOnBinary(t *testing.T) {
+	useDefaultRuntimeModelsConfig(t)
 	ctx := context.Background()
-	// Prime the cache miss so we hit the live discovery function.
-	modelCacheMu.Lock()
-	delete(modelCache, "hermes")
-	modelCacheMu.Unlock()
 
 	got, err := ListModels(ctx, "hermes", "/nonexistent/hermes")
 	if err != nil {
@@ -143,11 +146,9 @@ func TestListModelsHermesWithoutBinary(t *testing.T) {
 	}
 }
 
-func TestListModelsKiroWithoutBinary(t *testing.T) {
+func TestListModelsKiroAllowsConfiguredEmptyCatalog(t *testing.T) {
+	useDefaultRuntimeModelsConfig(t)
 	ctx := context.Background()
-	modelCacheMu.Lock()
-	delete(modelCache, "kiro")
-	modelCacheMu.Unlock()
 
 	got, err := ListModels(ctx, "kiro", "/nonexistent/kiro-cli")
 	if err != nil {
@@ -158,11 +159,9 @@ func TestListModelsKiroWithoutBinary(t *testing.T) {
 	}
 }
 
-func TestListModelsAgyWithoutBinary(t *testing.T) {
+func TestListModelsAgyDoesNotDependOnBinary(t *testing.T) {
+	useDefaultRuntimeModelsConfig(t)
 	ctx := context.Background()
-	modelCacheMu.Lock()
-	delete(modelCache, "agy")
-	modelCacheMu.Unlock()
 
 	got, err := ListModels(ctx, "agy", "/nonexistent/agy")
 	if err != nil {
@@ -191,6 +190,7 @@ Gemini 3.5 Flash (Medium)
 }
 
 func TestListModelsUnknownProvider(t *testing.T) {
+	useDefaultRuntimeModelsConfig(t)
 	ctx := context.Background()
 	_, err := ListModels(ctx, "nonexistent", "")
 	if err == nil {

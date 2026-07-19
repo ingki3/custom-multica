@@ -70,6 +70,13 @@ export function ModelPicker({
     if (id !== value) await onChange(id);
   };
 
+  const handleOpenChange = (nextOpen: boolean) => {
+    setOpen(nextOpen);
+    if (nextOpen && runtimeOnline && runtimeId) {
+      void modelsQuery.refetch();
+    }
+  };
+
   if (!supported && !modelsQuery.isLoading) {
     return (
       <span className="truncate italic text-muted-foreground">
@@ -86,7 +93,7 @@ export function ModelPicker({
   return (
     <PropertyPicker
       open={open}
-      onOpenChange={setOpen}
+      onOpenChange={handleOpenChange}
       width="w-auto min-w-[16rem] max-w-md"
       align="start"
       tooltip={triggerTitle}
