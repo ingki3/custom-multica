@@ -50,6 +50,7 @@ Environment overrides:
 ```bash
 MULTICA_SERVER_URL=http://localhost:8080
 MULTICA_WORKSPACE_ID=<workspace-uuid>
+MULTICA_RUNTIME_MODELS_CONFIG=~/.multica/runtime-models.json
 ```
 
 ## 2. Authentication and setup
@@ -663,6 +664,39 @@ multica runtime usage --output json
 multica runtime activity --output json
 multica runtime ping <runtime-id> --output json
 multica runtime update <runtime-id> --help
+```
+
+Runtime model catalogs are stored as JSON text and are read again for every model-list request from the agent settings UI. The daemon creates the default file on first use:
+
+- Default profile: `~/.multica/runtime-models.json`
+- Named profile: `~/.multica/profiles/<profile>/runtime-models.json`
+- Override: `MULTICA_RUNTIME_MODELS_CONFIG=/absolute/path/runtime-models.json`
+
+Each provider owns a `models` array. Model entries require `id` and `label`; `provider`, `default`, and `thinking` are optional. At most one model per provider may have `default: true`. Invalid JSON or metadata is returned to the UI as an explicit model-list failure. Because the file is uncached, an atomic edit is visible on the next request and does not require `multica daemon restart`.
+
+```json
+{
+  "version": 1,
+  "providers": {
+    "codex": {
+      "models": [
+        {
+          "id": "gpt-5.6-sol",
+          "label": "GPT-5.6-Sol",
+          "provider": "openai",
+          "default": true,
+          "thinking": {
+            "supported_levels": [
+              { "value": "low", "label": "Low" },
+              { "value": "high", "label": "High" }
+            ],
+            "default_level": "low"
+          }
+        }
+      ]
+    }
+  }
+}
 ```
 
 Agent troubleshooting pattern:

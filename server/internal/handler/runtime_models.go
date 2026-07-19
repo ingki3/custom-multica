@@ -51,10 +51,22 @@ type ModelListRequest struct {
 // Code's shipped default, or hermes' currentModelId) so the UI can
 // badge it — don't drop it when marshalling.
 type ModelEntry struct {
-	ID       string `json:"id"`
-	Label    string `json:"label"`
-	Provider string `json:"provider,omitempty"`
-	Default  bool   `json:"default,omitempty"`
+	ID       string              `json:"id"`
+	Label    string              `json:"label"`
+	Provider string              `json:"provider,omitempty"`
+	Default  bool                `json:"default,omitempty"`
+	Thinking *ModelThinkingEntry `json:"thinking,omitempty"`
+}
+
+type ModelThinkingEntry struct {
+	SupportedLevels []ThinkingLevelEntry `json:"supported_levels"`
+	DefaultLevel    string               `json:"default_level,omitempty"`
+}
+
+type ThinkingLevelEntry struct {
+	Value       string `json:"value"`
+	Label       string `json:"label"`
+	Description string `json:"description,omitempty"`
 }
 
 const (

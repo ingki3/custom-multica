@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -57,61 +56,16 @@ var (
 
 const modelCacheTTL = 60 * time.Second
 
-// ListModels returns the models supported by the given agent provider.
-// For providers with a known static catalog it returns the baked-in
-// list; for providers with a CLI discovery mechanism (opencode, pi,
-// openclaw, agy) it shells out with caching and falls back to the static
-// list on failure.
+// ListModels returns the models configured for the given agent provider.
+// The external JSON catalog is read on every call so model-setting screens
+// observe edits without a daemon restart or binary rebuild.
 //
-// executablePath lets the caller point at a non-default binary; pass
-// "" to use the provider's default name on PATH.
+// ctx and executablePath are retained for API compatibility with older
+// daemon call sites; catalog lookup itself no longer shells out to a CLI.
 func ListModels(ctx context.Context, providerType, executablePath string) ([]Model, error) {
-	switch providerType {
-	case "claude":
-		return claudeStaticModels(), nil
-	case "codex":
-		return cachedDiscovery(providerType+":"+executablePath, func() ([]Model, error) {
-			return discoverCodexModels(ctx, executablePath), nil
-		})
-	case "gemini":
-		return geminiStaticModels(), nil
-	case "cursor":
-		return cachedDiscovery(providerType, func() ([]Model, error) {
-			return discoverCursorModels(ctx, executablePath)
-		})
-	case "copilot":
-		return copilotStaticModels(), nil
-	case "hermes":
-		return cachedDiscovery(providerType, func() ([]Model, error) {
-			return discoverHermesModels(ctx, executablePath)
-		})
-	case "kimi":
-		return cachedDiscovery(providerType, func() ([]Model, error) {
-			return discoverKimiModels(ctx, executablePath)
-		})
-	case "kiro":
-		return cachedDiscovery(providerType, func() ([]Model, error) {
-			return discoverKiroModels(ctx, executablePath)
-		})
-	case "agy":
-		return cachedDiscovery(providerType, func() ([]Model, error) {
-			return discoverAgyModels(ctx, executablePath)
-		})
-	case "opencode":
-		return cachedDiscovery(providerType, func() ([]Model, error) {
-			return discoverOpenCodeModels(ctx, executablePath)
-		})
-	case "pi":
-		return cachedDiscovery(providerType, func() ([]Model, error) {
-			return discoverPiModels(ctx, executablePath)
-		})
-	case "openclaw":
-		return cachedDiscovery(providerType, func() ([]Model, error) {
-			return discoverOpenclawAgents(ctx, executablePath)
-		})
-	default:
-		return nil, fmt.Errorf("unknown agent type: %q", providerType)
-	}
+	_ = ctx
+	_ = executablePath
+	return configuredRuntimeModels(providerType)
 }
 
 // ModelSelectionSupported reports whether setting `agent.model` has
@@ -157,33 +111,11 @@ func cachedDiscovery(key string, fn func() ([]Model, error)) ([]Model, error) {
 // mislead users more than they help. Default = Sonnet because it's
 // the everyday workhorse (Opus is reserved for advisor-style flows).
 func claudeStaticModels() []Model {
-	return []Model{
-		{ID: "claude-fable-5", Label: "Claude Fable 5", Provider: "anthropic"},
-		{ID: "claude-opus-4-8", Label: "Claude Opus 4.8", Provider: "anthropic"},
-		{ID: "claude-sonnet-4-6", Label: "Claude Sonnet 4.6", Provider: "anthropic", Default: true},
-		{ID: "claude-opus-4-7", Label: "Claude Opus 4.7", Provider: "anthropic"},
-		{ID: "claude-haiku-4-5-20251001", Label: "Claude Haiku 4.5", Provider: "anthropic"},
-		{ID: "claude-opus-4-6", Label: "Claude Opus 4.6", Provider: "anthropic"},
-		{ID: "claude-sonnet-4-5", Label: "Claude Sonnet 4.5", Provider: "anthropic"},
-	}
+	return defaultConfiguredModels("claude")
 }
 
 func codexStaticModels() []Model {
-	return []Model{
-		{ID: "gpt-5.6-sol", Label: "GPT-5.6 Sol", Provider: "openai", Default: true},
-		{ID: "gpt-5.6-terra", Label: "GPT-5.6 Terra", Provider: "openai"},
-		{ID: "gpt-5.6-luna", Label: "GPT-5.6 Luna", Provider: "openai"},
-		{ID: "gpt-5.5", Label: "GPT-5.5", Provider: "openai"},
-		{ID: "gpt-5.5-pro", Label: "GPT-5.5 Pro", Provider: "openai"},
-		{ID: "gpt-5.4", Label: "GPT-5.4", Provider: "openai"},
-		{ID: "gpt-5.4-mini", Label: "GPT-5.4 mini", Provider: "openai"},
-		{ID: "gpt-5.4-nano", Label: "GPT-5.4 nano", Provider: "openai"},
-		{ID: "gpt-5.3-codex", Label: "GPT-5.3 Codex", Provider: "openai"},
-		{ID: "gpt-5.2-codex", Label: "GPT-5.2 Codex", Provider: "openai"},
-		{ID: "gpt-5", Label: "GPT-5", Provider: "openai"},
-		{ID: "o3", Label: "o3", Provider: "openai"},
-		{ID: "o3-mini", Label: "o3-mini", Provider: "openai"},
-	}
+	return defaultConfiguredModels("codex")
 }
 
 // geminiStaticModels lists the values we pass via `gemini -m`. Gemini
@@ -197,18 +129,7 @@ func codexStaticModels() []Model {
 // recommendation — the CLI picks Pro vs Flash per task and falls back
 // when quota is exhausted.
 func geminiStaticModels() []Model {
-	return []Model{
-		{ID: "auto", Label: "Auto (Gemini 3)", Provider: "google", Default: true},
-		{ID: "auto-gemini-2.5", Label: "Auto (Gemini 2.5)", Provider: "google"},
-		{ID: "pro", Label: "Pro", Provider: "google"},
-		{ID: "flash", Label: "Flash", Provider: "google"},
-		{ID: "flash-lite", Label: "Flash Lite", Provider: "google"},
-		{ID: "gemini-3-pro-preview", Label: "Gemini 3 Pro (preview)", Provider: "google"},
-		{ID: "gemini-3-flash-preview", Label: "Gemini 3 Flash (preview)", Provider: "google"},
-		{ID: "gemini-2.5-pro", Label: "Gemini 2.5 Pro", Provider: "google"},
-		{ID: "gemini-2.5-flash", Label: "Gemini 2.5 Flash", Provider: "google"},
-		{ID: "gemini-2.5-flash-lite", Label: "Gemini 2.5 Flash Lite", Provider: "google"},
-	}
+	return defaultConfiguredModels("gemini")
 }
 
 // cursorStaticModels is a minimal fallback used when
@@ -218,9 +139,7 @@ func geminiStaticModels() []Model {
 // `claude-4.6-sonnet-medium`, `gemini-3.1-pro`) and any static
 // list we ship goes stale fast.
 func cursorStaticModels() []Model {
-	return []Model{
-		{ID: "auto", Label: "Auto", Provider: "cursor", Default: true},
-	}
+	return defaultConfiguredModels("cursor")
 }
 
 // copilotStaticModels — GitHub Copilot CLI resolves models via the
@@ -228,10 +147,7 @@ func cursorStaticModels() []Model {
 // Default: the right model is whatever GitHub routes the request
 // to, and forcing one here would override that.
 func copilotStaticModels() []Model {
-	return []Model{
-		{ID: "gpt-5.4", Label: "GPT-5.4", Provider: "openai"},
-		{ID: "claude-sonnet-4-6", Label: "Claude Sonnet 4.6", Provider: "anthropic"},
-	}
+	return defaultConfiguredModels("copilot")
 }
 
 // ── Dynamic discovery ──

@@ -44,9 +44,9 @@ export function runtimeModelsOptions(runtimeId: string | null | undefined) {
       : runtimeModelsKeys.all(),
     queryFn: () => resolveRuntimeModels(runtimeId as string),
     enabled: Boolean(runtimeId),
-    // Models rarely change; cache for 60s to match the server-side
-    // cache in agent.ListModels.
-    staleTime: 60_000,
+    // The daemon re-reads its editable model catalog for every request.
+    // Keep this query stale so remounting a settings surface refetches it.
+    staleTime: 0,
     retry: false,
   });
 }

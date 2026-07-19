@@ -120,6 +120,7 @@ Multica 存储用户上传的附件（评论里的图片、文件等）。**优�
 | `MULTICA_DAEMON_MAX_CONCURRENT_TASKS` | `20` | 并发任务上限 |
 | `MULTICA_<PROVIDER>_PATH` | 对应 CLI 名 | 各 AI 编程工具的可执行文件路径（如 `MULTICA_CLAUDE_PATH`）|
 | `MULTICA_<PROVIDER>_MODEL` | 空 | 各 AI 编程工具的默认模型 |
+| `MULTICA_RUNTIME_MODELS_CONFIG` | profile 下的 `runtime-models.json` | 用绝对路径覆盖可编辑的 runtime 模型目录路径；每次请求模型列表时都会重新读取 |
 
 完整解释每个参数对守护进程行为的影响，见 [守护进程与运行时](/daemon-runtimes)。
 

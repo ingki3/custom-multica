@@ -684,10 +684,11 @@ func (d *Daemon) handleModelList(ctx context.Context, rt Runtime, requestID stri
 	// map[string]string) so the Default bool round-trips — without
 	// it the UI loses its "default" badge on the advertised pick.
 	type modelWire struct {
-		ID       string `json:"id"`
-		Label    string `json:"label"`
-		Provider string `json:"provider,omitempty"`
-		Default  bool   `json:"default,omitempty"`
+		ID       string               `json:"id"`
+		Label    string               `json:"label"`
+		Provider string               `json:"provider,omitempty"`
+		Default  bool                 `json:"default,omitempty"`
+		Thinking *agent.ModelThinking `json:"thinking,omitempty"`
 	}
 	wire := make([]modelWire, 0, len(models))
 	for _, m := range models {
@@ -696,6 +697,7 @@ func (d *Daemon) handleModelList(ctx context.Context, rt Runtime, requestID stri
 			Label:    m.Label,
 			Provider: m.Provider,
 			Default:  m.Default,
+			Thinking: m.Thinking,
 		})
 	}
 	d.client.ReportModelListResult(ctx, rt.ID, requestID, map[string]any{

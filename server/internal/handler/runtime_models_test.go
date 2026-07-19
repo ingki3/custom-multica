@@ -42,12 +42,9 @@ func TestModelListStore_RunningRequestTimesOut(t *testing.T) {
 	}
 }
 
-// TestReportModelListResult_PreservesDefault guards the daemon → server
-// → UI wire format for the model-discovery result. The `default` bool
-// on each ModelEntry lights up the UI's "default" badge; if it gets
-// dropped here (e.g. by going through a map[string]string), the badge
-// silently disappears.
-func TestReportModelListResult_PreservesDefault(t *testing.T) {
+// TestReportModelListResult_PreservesModelMetadata guards the daemon → server
+// → UI wire format for display-default and thinking-level metadata.
+func TestReportModelListResult_PreservesModelMetadata(t *testing.T) {
 	store := NewModelListStore()
 	req := store.Create("runtime-xyz")
 
@@ -56,7 +53,13 @@ func TestReportModelListResult_PreservesDefault(t *testing.T) {
 		"status":    "completed",
 		"supported": true,
 		"models": []map[string]any{
-			{"id": "foo-default", "label": "Foo", "provider": "p", "default": true},
+			{
+				"id": "foo-default", "label": "Foo", "provider": "p", "default": true,
+				"thinking": map[string]any{
+					"supported_levels": []map[string]any{{"value": "high", "label": "High"}},
+					"default_level":    "high",
+				},
+			},
 			{"id": "bar", "label": "Bar", "provider": "p"},
 		},
 	}
@@ -87,12 +90,18 @@ func TestReportModelListResult_PreservesDefault(t *testing.T) {
 	if got.Models[1].Default {
 		t.Errorf("second model should carry Default=false, got %+v", got.Models[1])
 	}
+	if got.Models[0].Thinking == nil || got.Models[0].Thinking.DefaultLevel != "high" {
+		t.Errorf("first model should preserve thinking metadata, got %+v", got.Models[0])
+	}
 
 	// Serialise the stored request back out (what UI actually sees)
 	// and confirm `default: true` survives.
 	out, _ := json.Marshal(got)
 	if !bytes.Contains(out, []byte(`"default":true`)) {
 		t.Errorf(`expected "default":true in JSON response, got: %s`, out)
+	}
+	if !bytes.Contains(out, []byte(`"default_level":"high"`)) {
+		t.Errorf(`expected thinking metadata in JSON response, got: %s`, out)
 	}
 }
 
