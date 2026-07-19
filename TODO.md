@@ -2,6 +2,7 @@
 
 ## Completed
 
+- [x] **In Review 이슈의 Agent task 상태 표시** — Board 카드의 task snapshot 조회 및 활성 task 배지를 `in_progress`뿐 아니라 `in_review`에도 적용. Review Agent task가 `running`이면 `Progress`, `queued`/`dispatched`이면 `Queued`로 표시하고 상태 선택 로직 회귀 테스트를 추가.
 - [x] **Dev Agent → Sub Dev Agent fallback** — `failure_reason` taxonomy를 확장해 Codex auth/token 만료, rate/quota/context/model limit을 분류하고, agent별 fallback policy(`fallback_agent_id`, `fallback_failure_reasons`, `fallback_max_depth`)로 허용된 실패에서 fallback task를 생성하도록 구현. Same-provider `auth_expired`/`quota_exceeded` fallback 차단, fallback lineage/prompt/manual/타입/회귀 테스트 추가. 구현 계획: `.hermes/plans/2026-07-12_122032-dev-agent-fallback.md`.
 - [x] **Claude 런타임 모델 목록 최신화** — Claude Code 2.1.185의 `claude models` 출력 기준으로 `claude-fable-5`(Claude Fable 5)와 `claude-opus-4-8`(Claude Opus 4.8)을 Claude runtime static catalog에 추가하고 Sonnet 4.6 기본값은 유지. Opus 4.8 비용 추정 매핑과 회귀 테스트를 추가했으며, 로컬 CLI 빌드/설치 및 데몬 재시작 후 `/api/runtimes/{claude}/models` 결과에 Fable 5/Opus 4.8/Sonnet 4.6이 표시되는 것을 확인.
 - [x] **Antigravity `agy` 런타임 자동 감지** — `agy` provider를 추가해 데몬 `LoadConfig`가 `MULTICA_AGY_PATH`/`MULTICA_AGY_MODEL`을 읽고 PATH의 `agy` CLI를 런타임으로 등록하도록 구현. `agy --print` 기반 실행 backend, `agy models` 기반 동적 모델 조회, launch header, 회귀 테스트를 추가. 지원 CLI/환경변수 문서와 provider matrix를 12개 도구 기준으로 갱신하고, 로컬 `/opt/homebrew/bin/multica` 바이너리를 새 빌드로 교체한 뒤 데몬을 재시작해 status에 `agy`가 표시되는 것을 확인.
