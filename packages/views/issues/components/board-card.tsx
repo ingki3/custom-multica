@@ -24,6 +24,7 @@ import { ProgressRing } from "./progress-ring";
 import type { ChildProgress } from "./list-row";
 import { IssueActionsContextMenu } from "../actions";
 import { LabelChip } from "../../labels/label-chip";
+import { findActiveIssueTask, shouldShowIssueTaskStatus } from "./issue-task-status";
 
 function formatDate(date: string): string {
   return new Date(date).toLocaleDateString("en-US", {
@@ -64,15 +65,15 @@ export const BoardCardContent = memo(function BoardCardContent({
   const project = issue.project_id ? projects.find((p) => p.id === issue.project_id) : undefined;
   const labels = issue.labels ?? [];
 
-  // Task status for in_progress issues
+  const showTaskStatus = shouldShowIssueTaskStatus(issue.status);
   const { data: taskSnapshot = [] } = useQuery({
     ...agentTaskSnapshotOptions(wsId),
-    enabled: issue.status === "in_progress",
+    enabled: showTaskStatus,
   });
-  const activeTask = useMemo(() => {
-    if (issue.status !== "in_progress") return null;
-    return taskSnapshot.find((t) => t.issue_id === issue.id && (t.status === "running" || t.status === "queued" || t.status === "dispatched")) ?? null;
-  }, [taskSnapshot, issue.id, issue.status]);
+  const activeTask = useMemo(
+    () => findActiveIssueTask(issue.id, issue.status, taskSnapshot),
+    [taskSnapshot, issue.id, issue.status],
+  );
 
   const updateIssueMutation = useUpdateIssue();
   const handleUpdate = useCallback(
