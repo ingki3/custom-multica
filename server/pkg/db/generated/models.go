@@ -54,20 +54,21 @@ type AgentMcpServer struct {
 }
 
 type AgentRuntime struct {
-	ID             pgtype.UUID        `json:"id"`
-	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
-	DaemonID       pgtype.Text        `json:"daemon_id"`
-	Name           string             `json:"name"`
-	RuntimeMode    string             `json:"runtime_mode"`
-	Provider       string             `json:"provider"`
-	Status         string             `json:"status"`
-	DeviceInfo     string             `json:"device_info"`
-	Metadata       []byte             `json:"metadata"`
-	LastSeenAt     pgtype.Timestamptz `json:"last_seen_at"`
-	CreatedAt      pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
-	OwnerID        pgtype.UUID        `json:"owner_id"`
-	LegacyDaemonID pgtype.Text        `json:"legacy_daemon_id"`
+	ID                  pgtype.UUID        `json:"id"`
+	WorkspaceID         pgtype.UUID        `json:"workspace_id"`
+	DaemonID            pgtype.Text        `json:"daemon_id"`
+	Name                string             `json:"name"`
+	RuntimeMode         string             `json:"runtime_mode"`
+	Provider            string             `json:"provider"`
+	Status              string             `json:"status"`
+	DeviceInfo          string             `json:"device_info"`
+	Metadata            []byte             `json:"metadata"`
+	LastSeenAt          pgtype.Timestamptz `json:"last_seen_at"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+	OwnerID             pgtype.UUID        `json:"owner_id"`
+	LegacyDaemonID      pgtype.Text        `json:"legacy_daemon_id"`
+	LastRecoveredBootID pgtype.UUID        `json:"last_recovered_boot_id"`
 }
 
 type AgentSkill struct {
@@ -77,30 +78,32 @@ type AgentSkill struct {
 }
 
 type AgentTaskQueue struct {
-	ID               pgtype.UUID        `json:"id"`
-	AgentID          pgtype.UUID        `json:"agent_id"`
-	IssueID          pgtype.UUID        `json:"issue_id"`
-	Status           string             `json:"status"`
-	Priority         int32              `json:"priority"`
-	DispatchedAt     pgtype.Timestamptz `json:"dispatched_at"`
-	StartedAt        pgtype.Timestamptz `json:"started_at"`
-	CompletedAt      pgtype.Timestamptz `json:"completed_at"`
-	Result           []byte             `json:"result"`
-	Error            pgtype.Text        `json:"error"`
-	CreatedAt        pgtype.Timestamptz `json:"created_at"`
-	Context          []byte             `json:"context"`
-	RuntimeID        pgtype.UUID        `json:"runtime_id"`
-	SessionID        pgtype.Text        `json:"session_id"`
-	WorkDir          pgtype.Text        `json:"work_dir"`
-	TriggerCommentID pgtype.UUID        `json:"trigger_comment_id"`
-	ChatSessionID    pgtype.UUID        `json:"chat_session_id"`
-	AutopilotRunID   pgtype.UUID        `json:"autopilot_run_id"`
-	Attempt          int32              `json:"attempt"`
-	MaxAttempts      int32              `json:"max_attempts"`
-	ParentTaskID     pgtype.UUID        `json:"parent_task_id"`
-	FailureReason    pgtype.Text        `json:"failure_reason"`
-	LastHeartbeatAt  pgtype.Timestamptz `json:"last_heartbeat_at"`
-	TriggerSummary   pgtype.Text        `json:"trigger_summary"`
+	ID                         pgtype.UUID        `json:"id"`
+	AgentID                    pgtype.UUID        `json:"agent_id"`
+	IssueID                    pgtype.UUID        `json:"issue_id"`
+	Status                     string             `json:"status"`
+	Priority                   int32              `json:"priority"`
+	DispatchedAt               pgtype.Timestamptz `json:"dispatched_at"`
+	StartedAt                  pgtype.Timestamptz `json:"started_at"`
+	CompletedAt                pgtype.Timestamptz `json:"completed_at"`
+	Result                     []byte             `json:"result"`
+	Error                      pgtype.Text        `json:"error"`
+	CreatedAt                  pgtype.Timestamptz `json:"created_at"`
+	Context                    []byte             `json:"context"`
+	RuntimeID                  pgtype.UUID        `json:"runtime_id"`
+	SessionID                  pgtype.Text        `json:"session_id"`
+	WorkDir                    pgtype.Text        `json:"work_dir"`
+	TriggerCommentID           pgtype.UUID        `json:"trigger_comment_id"`
+	ChatSessionID              pgtype.UUID        `json:"chat_session_id"`
+	AutopilotRunID             pgtype.UUID        `json:"autopilot_run_id"`
+	Attempt                    int32              `json:"attempt"`
+	MaxAttempts                int32              `json:"max_attempts"`
+	ParentTaskID               pgtype.UUID        `json:"parent_task_id"`
+	FailureReason              pgtype.Text        `json:"failure_reason"`
+	LastHeartbeatAt            pgtype.Timestamptz `json:"last_heartbeat_at"`
+	TriggerSummary             pgtype.Text        `json:"trigger_summary"`
+	FailureProcessingStartedAt pgtype.Timestamptz `json:"failure_processing_started_at"`
+	FailureHandledAt           pgtype.Timestamptz `json:"failure_handled_at"`
 }
 
 type Attachment struct {
@@ -414,6 +417,22 @@ type TaskMessage struct {
 	Input     []byte             `json:"input"`
 	Output    pgtype.Text        `json:"output"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
+type TaskRemediation struct {
+	ID             pgtype.UUID        `json:"id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	IssueID        pgtype.UUID        `json:"issue_id"`
+	FailedTaskID   pgtype.UUID        `json:"failed_task_id"`
+	SourceAgentID  pgtype.UUID        `json:"source_agent_id"`
+	TargetAgentID  pgtype.UUID        `json:"target_agent_id"`
+	CreatedTaskID  pgtype.UUID        `json:"created_task_id"`
+	RemediationKey string             `json:"remediation_key"`
+	Action         string             `json:"action"`
+	Automated      bool               `json:"automated"`
+	Reason         string             `json:"reason"`
+	CreatedBy      pgtype.UUID        `json:"created_by"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 }
 
 type TaskToken struct {

@@ -438,7 +438,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
               <DropdownMenu>
                 <DropdownMenuTrigger
                   render={
-                    <SidebarMenuButton>
+                    <SidebarMenuButton aria-label="Workspace switcher">
                       <span className="relative">
                         <WorkspaceAvatar name={workspace?.name ?? "M"} size="sm" />
                         {myInvitations.length > 0 && (

@@ -54,6 +54,7 @@ Token 类型的详细区分见 [认证与令牌](/auth-tokens)。
 | `multica issue search <query>` | 关键字搜索 |
 | `multica issue runs <id>` | 查看 issue 上智能体跑过的任务 |
 | `multica issue rerun <id>` | 重跑最近一次智能体任务 |
+| `multica issue remediate <id> ...` | 最终任务失败后，原子化地重跑、改派后重跑或阻塞 issue |
 | `multica issue comment <id> ...` | 嵌套：看 / 发评论 |
 | `multica issue subscriber <id> ...` | 嵌套：订阅 / 取消订阅 |
 | `multica project list/get/create/update/delete/status` | Project CRUD |

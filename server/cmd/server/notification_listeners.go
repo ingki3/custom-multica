@@ -18,7 +18,6 @@ type mention struct {
 	ID   string // user_id, agent_id, issue_id, or "all"
 }
 
-
 // statusLabels maps DB status values to human-readable labels for notifications.
 var statusLabels = map[string]string{
 	"backlog":     "Backlog",
@@ -652,7 +651,7 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 	// task:failed — notify all subscribers except the agent
 	bus.Subscribe(protocol.EventTaskFailed, func(e events.Event) {
 		payload, ok := e.Payload.(map[string]any)
-		if !ok {
+		if !ok || !shouldNotifyTaskFailure(payload) {
 			return
 		}
 		agentID, _ := payload["agent_id"].(string)
@@ -683,6 +682,11 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 			issue.Title, "",
 			emptyDetails)
 	})
+}
+
+func shouldNotifyTaskFailure(payload map[string]any) bool {
+	finalFailure, ok := payload["final_failure"].(bool)
+	return ok && finalFailure
 }
 
 // inboxItemToResponse converts a db.InboxItem into a map suitable for

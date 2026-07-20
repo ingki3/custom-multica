@@ -72,13 +72,33 @@ func sweepStaleRuntimes(ctx context.Context, queries *db.Queries, taskSvc *servi
 
 	slog.Info("runtime sweeper: marked stale runtimes offline", "count", len(staleRows), "workspaces", len(workspaces))
 
-	// Fail orphaned tasks (dispatched/running) whose runtimes just went offline.
-	failedTasks, err := queries.FailTasksForOfflineRuntimes(ctx)
-	if err != nil {
-		slog.Warn("runtime sweeper: failed to clean up stale tasks", "error", err)
-	} else if len(failedTasks) > 0 {
-		slog.Info("runtime sweeper: failed orphaned tasks", "count", len(failedTasks))
-		taskSvc.HandleFailedTasks(ctx, failedTasks)
+	// Fail and summarize tasks once per runtime transition, not once per task.
+	// MarkStaleRuntimesOffline only returns online→offline rows, which is the
+	// transition-level once guard for runtime.offline.
+	for _, stale := range staleRows {
+		failedTasks, failErr := queries.FailTasksForOfflineRuntime(ctx, stale.ID)
+		if failErr != nil {
+			// The online→offline transition has already committed and will not be
+			// returned by a later sweep. Still emit its operational event rather
+			// than silently losing the transition; task cleanup remains covered by
+			// the independent stale-task sweeper.
+			slog.Warn("runtime sweeper: failed to clean up stale tasks", "runtime_id", util.UUIDToString(stale.ID), "error", failErr)
+			failedTasks = nil
+		} else {
+			dispositions := taskSvc.HandleFailedTasks(ctx, failedTasks)
+			retried, final := failureDispositionCounts(dispositions)
+			if len(failedTasks) > 0 {
+				slog.Info("runtime sweeper: failed orphaned tasks", "runtime_id", util.UUIDToString(stale.ID), "count", len(failedTasks), "retried", retried, "final", final)
+			}
+		}
+
+		// MarkStaleRuntimesOffline already returns every field used by the
+		// operational payload. Avoid a redundant read that could otherwise lose
+		// an already-committed transition event.
+		runtime := db.AgentRuntime{ID: stale.ID, WorkspaceID: stale.WorkspaceID, Provider: stale.Provider}
+		if !service.PublishRuntimeOffline(ctx, queries, bus, runtime, failedTasks) {
+			slog.Warn("runtime sweeper: failed to publish runtime offline", "runtime_id", util.UUIDToString(stale.ID))
+		}
 	}
 
 	// Notify frontend clients so they re-fetch runtime list.
@@ -144,8 +164,21 @@ func sweepStaleTasks(ctx context.Context, queries *db.Queries, taskSvc *service.
 		return
 	}
 
-	slog.Info("task sweeper: failed stale tasks", "count", len(failedTasks))
-	taskSvc.HandleFailedTasks(ctx, failedTasks)
+	dispositions := taskSvc.HandleFailedTasks(ctx, failedTasks)
+	retried, final := failureDispositionCounts(dispositions)
+	slog.Info("task sweeper: failed stale tasks", "count", len(failedTasks), "retried", retried, "final", final)
+}
+
+func failureDispositionCounts(dispositions []service.FailureDisposition) (retried, final int) {
+	for _, disposition := range dispositions {
+		if disposition.WillRetry {
+			retried++
+		}
+		if disposition.FinalFailure {
+			final++
+		}
+	}
+	return retried, final
 }
 
 // broadcastFailedTasks is preserved as a thin shim for the integration tests

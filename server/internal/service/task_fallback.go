@@ -9,7 +9,6 @@ import (
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
-	"github.com/multica-ai/multica/server/pkg/redact"
 )
 
 type FallbackContext struct {
@@ -174,11 +173,6 @@ func (s *TaskService) MaybeFallbackFailedTask(ctx context.Context, parent db.Age
 		"fallback_agent_id", util.UUIDToString(fallbackAgent.ID),
 		"reason", reason,
 	)
-
-	if parent.IssueID.Valid {
-		msg := fmt.Sprintf("Fallback triggered: original agent failed with `%s`; continuing with fallback agent `%s`.", reason, fallbackAgent.Name)
-		s.createAgentComment(ctx, parent.IssueID, sourceAgent.ID, redact.Text(msg), "system", parent.TriggerCommentID)
-	}
 
 	s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, child)
 	s.notifyTaskAvailable(child)

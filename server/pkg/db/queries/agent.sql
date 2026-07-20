@@ -96,6 +96,36 @@ UPDATE agent_task_queue
 SET issue_id = $2
 WHERE id = $1 AND issue_id IS NULL;
 
+-- name: ClaimTaskFailureProcessing :one
+-- Claims one failed task for post-failure processing. An abandoned claim can
+-- be reclaimed after five minutes; successful processing sets
+-- failure_handled_at and permanently closes the row.
+UPDATE agent_task_queue
+SET failure_processing_started_at = now()
+WHERE id = $1
+  AND status = 'failed'
+  AND failure_handled_at IS NULL
+  AND (
+      failure_processing_started_at IS NULL
+      OR failure_processing_started_at < now() - interval '5 minutes'
+  )
+RETURNING *;
+
+-- name: MarkTaskFailureHandled :exec
+UPDATE agent_task_queue
+SET failure_handled_at = now(), failure_processing_started_at = NULL
+WHERE id = $1 AND failure_handled_at IS NULL;
+
+-- name: ReleaseTaskFailureProcessing :exec
+UPDATE agent_task_queue
+SET failure_processing_started_at = NULL
+WHERE id = $1 AND failure_handled_at IS NULL;
+
+-- name: GetTaskChildByParent :one
+SELECT * FROM agent_task_queue
+WHERE parent_task_id = $1
+LIMIT 1;
+
 -- name: CreateRetryTask :one
 -- Clones a parent task into a fresh queued attempt. Carries forward the
 -- agent's resume context (session_id/work_dir) so the child can continue

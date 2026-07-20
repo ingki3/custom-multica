@@ -79,7 +79,6 @@ export function useWorkspacePresenceMap(wsId: string | undefined): {
       snapshot: safeSnapshot,
       now: Date.now(),
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [agents, runtimes, snapshot, agentsErr, runtimesErr, snapshotErr, tick]);
 
   return {
@@ -157,6 +156,5 @@ export function useAgentPresenceDetail(
 
     const tasks = safeSnapshot.filter((t) => t.agent_id === agentId);
     return deriveAgentPresenceDetail({ agent, runtime, tasks, now: Date.now() });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wsId, agentId, agents, runtimes, snapshot, agentsErr, runtimesErr, snapshotErr, tick]);
 }

@@ -33,7 +33,8 @@ test.describe("Issues", () => {
     await expect(page.locator("text=Backlog")).toBeVisible();
 
     // Switch to list view
-    await page.click("text=List");
+    await page.getByRole("button", { name: "Board view options" }).click();
+    await page.getByRole("menuitem", { name: "List" }).click();
     await expect(page.getByText(title)).toBeVisible();
   });
 

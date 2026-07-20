@@ -439,8 +439,8 @@ func TestNotification_AssigneeChanged(t *testing.T) {
 				AssigneeType: &newAssigneeType,
 				AssigneeID:   &newAssigneeID,
 			},
-			"assignee_changed":  true,
-			"status_changed":    false,
+			"assignee_changed":   true,
+			"status_changed":     false,
 			"prev_assignee_type": &oldAssigneeType,
 			"prev_assignee_id":   &oldAssigneeID,
 		},
@@ -551,10 +551,11 @@ func TestNotification_TaskFailed(t *testing.T) {
 		ActorType:   "system",
 		ActorID:     "",
 		Payload: map[string]any{
-			"task_id":  "00000000-0000-0000-0000-bbbbbbbbbbbb",
-			"agent_id": agentID,
-			"issue_id": issueID,
-			"status":   "failed",
+			"task_id":       "00000000-0000-0000-0000-bbbbbbbbbbbb",
+			"agent_id":      agentID,
+			"issue_id":      issueID,
+			"status":        "failed",
+			"final_failure": true,
 		},
 	})
 
@@ -858,5 +859,21 @@ func TestNotification_ParentBubble_PriorityChangeSuppressed(t *testing.T) {
 	items := inboxItemsForRecipient(t, queries, parentSubID)
 	if len(items) != 0 {
 		t.Fatalf("expected 0 inbox items bubbled to parent subscriber for priority_changed, got %d", len(items))
+	}
+}
+
+func TestShouldNotifyTaskFailureRequiresFinalDisposition(t *testing.T) {
+	for _, payload := range []map[string]any{
+		nil,
+		{},
+		{"final_failure": false},
+		{"final_failure": "true"},
+	} {
+		if shouldNotifyTaskFailure(payload) {
+			t.Fatalf("non-final payload should not notify: %#v", payload)
+		}
+	}
+	if !shouldNotifyTaskFailure(map[string]any{"final_failure": true}) {
+		t.Fatal("final failure should notify")
 	}
 }

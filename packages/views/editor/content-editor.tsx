@@ -199,6 +199,9 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
           },
         },
         attributes: {
+          role: "textbox",
+          "aria-label": placeholderText || "Rich text editor",
+          "aria-multiline": "true",
           class: cn(
             "rich-text-editor text-sm outline-none",
             !editable && "readonly",

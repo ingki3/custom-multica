@@ -6,7 +6,9 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -527,4 +529,47 @@ func unhex(c byte) byte {
 		return c - 'A' + 10
 	}
 	return 0
+}
+
+func TestSweepStaleRuntimesPublishesOfflineOncePerTransition(t *testing.T) {
+	if testPool == nil {
+		t.Skip("no database connection")
+	}
+	ctx := context.Background()
+	var runtimeID string
+	err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_runtime (workspace_id, daemon_id, name, runtime_mode, provider, status, last_seen_at)
+		VALUES ($1, $2, 'offline-event-test', 'local', 'claude', 'online', now() - interval '2 minutes')
+		RETURNING id
+	`, testWorkspaceID, uuid.NewString()).Scan(&runtimeID)
+	if err != nil {
+		t.Fatalf("create runtime: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_runtime WHERE id = $1`, runtimeID) })
+
+	queries := db.New(testPool)
+	bus := events.New()
+	taskSvc := service.NewTaskService(queries, testPool, nil, bus, nil)
+	var received []events.Event
+	bus.Subscribe(service.EventRuntimeOffline, func(event events.Event) {
+		payload, _ := event.Payload.(map[string]any)
+		runtimePayload, _ := payload["runtime"].(map[string]any)
+		if runtimePayload["id"] == runtimeID {
+			received = append(received, event)
+		}
+	})
+
+	sweepStaleRuntimes(ctx, queries, taskSvc, bus)
+	sweepStaleRuntimes(ctx, queries, taskSvc, bus)
+	if len(received) != 1 {
+		t.Fatalf("expected one runtime.offline event across repeated sweeps, got %d", len(received))
+	}
+	payload := received[0].Payload.(map[string]any)
+	runtimePayload := payload["runtime"].(map[string]any)
+	if runtimePayload["id"] != runtimeID || runtimePayload["provider"] != "claude" {
+		t.Fatalf("unexpected runtime payload: %#v", runtimePayload)
+	}
+	if payload["failed_task_count"] != 0 || payload["affected_issue_count"] != 0 {
+		t.Fatalf("unexpected empty-transition counts: %#v", payload)
+	}
 }

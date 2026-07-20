@@ -6,7 +6,10 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -22,10 +25,22 @@ import (
 // knows the moment it comes back up, so we let it report orphan recovery.
 func (h *Handler) RecoverOrphanedTasks(w http.ResponseWriter, r *http.Request) {
 	runtimeID := chi.URLParam(r, "runtimeId")
-	if _, ok := h.requireDaemonRuntimeAccess(w, r, runtimeID); !ok {
+	runtime, ok := h.requireDaemonRuntimeAccess(w, r, runtimeID)
+	if !ok {
 		return
 	}
+	var req struct {
+		BootID string `json:"boot_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || uuid.Validate(req.BootID) != nil {
+		writeError(w, http.StatusBadRequest, "valid boot_id is required")
+		return
+	}
+	bootUUID, _ := parseUUIDOrBadRequest(w, req.BootID, "boot_id")
 
+	// RecoverOrphanedTasksForRuntime is itself an atomic status transition: a
+	// duplicate (including a concurrent duplicate) cannot receive rows already
+	// changed to failed, so retry/final-failure side effects are not repeated.
 	rows, err := h.Queries.RecoverOrphanedTasksForRuntime(r.Context(), parseUUID(runtimeID))
 	if err != nil {
 		slog.Warn("recover-orphans failed", "runtime_id", runtimeID, "error", err)
@@ -38,7 +53,23 @@ func (h *Handler) RecoverOrphanedTasks(w http.ResponseWriter, r *http.Request) {
 	// behaviour as the runtime sweeper. This was previously a fast-path
 	// that bypassed those side effects, leaving the UI stale when no retry
 	// was created (max_attempts exhausted, autopilot, non-retryable reason).
-	retried := h.TaskService.HandleFailedTasks(r.Context(), rows)
+	dispositions := h.TaskService.HandleFailedTasks(r.Context(), rows)
+	retried, final := recoveryDispositionCounts(dispositions)
+
+	// Persist the boot admission only after orphan handling and retry decisions
+	// complete. This prevents a failed recovery pass from permanently suppressing
+	// the daemon's retry while still admitting one event per runtime/boot.
+	recordedRuntime, recordErr := h.Queries.RecordRuntimeRecoveryBoot(r.Context(), db.RecordRuntimeRecoveryBootParams{
+		RuntimeID: runtime.ID,
+		BootID:    bootUUID,
+	})
+	if recordErr == nil {
+		service.PublishRuntimeRecovered(r.Context(), h.Queries, h.Bus, recordedRuntime, req.BootID, rows, dispositions)
+	} else if recordErr != pgx.ErrNoRows {
+		slog.Warn("record runtime recovery boot failed", "runtime_id", runtimeID, "boot_id", req.BootID, "error", recordErr)
+		writeError(w, http.StatusInternalServerError, "record runtime recovery failed")
+		return
+	}
 
 	if len(rows) > 0 {
 		slog.Info("recover-orphans completed",
@@ -51,7 +82,20 @@ func (h *Handler) RecoverOrphanedTasks(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"orphaned": len(rows),
 		"retried":  retried,
+		"final":    final,
 	})
+}
+
+func recoveryDispositionCounts(dispositions []service.FailureDisposition) (retried, final int) {
+	for _, disposition := range dispositions {
+		if disposition.WillRetry {
+			retried++
+		}
+		if disposition.FinalFailure {
+			final++
+		}
+	}
+	return retried, final
 }
 
 // PinTaskSession lets the daemon persist the agent's session_id and

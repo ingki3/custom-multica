@@ -41,6 +41,5 @@ export function useRuntimeHealth(
     const runtime = runtimes.find((r) => r.id === runtimeId);
     if (!runtime) return "loading";
     return deriveRuntimeHealth(runtime, Date.now());
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wsId, runtimeId, runtimes, tick]);
 }

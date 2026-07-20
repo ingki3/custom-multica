@@ -406,6 +406,7 @@ export function ChatWindow() {
                   variant="ghost"
                   size="icon-sm"
                   className="text-muted-foreground"
+                  aria-label={isAtMax ? "Restore chat" : "Expand chat"}
                   onClick={toggleExpand}
                 />
               }
@@ -423,6 +424,7 @@ export function ChatWindow() {
                   variant="ghost"
                   size="icon-sm"
                   className="text-muted-foreground"
+                  aria-label="Minimize chat"
                   onClick={handleMinimize}
                 />
               }

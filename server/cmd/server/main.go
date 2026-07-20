@@ -117,6 +117,7 @@ func envDuration(name string, def time.Duration) time.Duration {
 
 func main() {
 	logger.Init()
+	lifecycle := newServerLifecycle()
 
 	// Warn about missing configuration
 	if os.Getenv("JWT_SECRET") == "" {
@@ -311,9 +312,21 @@ func main() {
 		}()
 	}
 
+	listener, err := bindHTTPServer(srv, nil)
+	if err != nil {
+		slog.Error("server bind failed", "address", srv.Addr, "error", err)
+		os.Exit(1)
+	}
+	bindAddress := listener.Addr().String()
+	if err := service.PublishServerReady(context.Background(), queries, bus, service.ServerReadyInfo{
+		BootID: lifecycle.BootID, Version: version, BindAddress: bindAddress, StartedAt: lifecycle.StartedAt,
+	}); err != nil {
+		slog.Warn("server ready webhook publish failed", "error", err)
+	}
+
 	go func() {
-		slog.Info("server starting", "port", port)
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		slog.Info("server starting", "port", port, "bind_address", bindAddress, "boot_id", lifecycle.BootID)
+		if err := srv.Serve(listener); err != nil && err != http.ErrServerClosed {
 			slog.Error("server error", "error", err)
 			os.Exit(1)
 		}

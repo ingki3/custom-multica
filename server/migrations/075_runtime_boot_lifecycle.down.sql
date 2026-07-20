@@ -1,0 +1,2 @@
+ALTER TABLE agent_runtime
+DROP COLUMN last_recovered_boot_id;
