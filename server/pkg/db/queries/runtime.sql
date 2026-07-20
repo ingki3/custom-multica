@@ -55,18 +55,26 @@ UPDATE agent_runtime
 SET status = 'offline', updated_at = now()
 WHERE status = 'online'
   AND last_seen_at < now() - make_interval(secs => @stale_seconds::double precision)
-RETURNING id, workspace_id;
+RETURNING id, workspace_id, provider;
 
--- name: FailTasksForOfflineRuntimes :many
--- Marks dispatched/running tasks as failed when their runtime is offline.
--- This cleans up orphaned tasks after a daemon crash or network partition.
+-- name: FailTasksForOfflineRuntime :many
+-- Marks dispatched/running tasks as failed for one runtime transition. Scoping
+-- this by runtime keeps operational counts attributable to that transition.
 UPDATE agent_task_queue
 SET status = 'failed', completed_at = now(), error = 'runtime went offline',
     failure_reason = 'runtime_offline'
 WHERE status IN ('dispatched', 'running')
-  AND runtime_id IN (
-    SELECT id FROM agent_runtime WHERE status = 'offline'
-  )
+  AND runtime_id = $1
+RETURNING *;
+
+-- name: RecordRuntimeRecoveryBoot :one
+-- Returns the runtime only when this daemon boot has not already reported a
+-- recovery transition. The persisted boot ID makes repeated HTTP requests
+-- idempotent across API processes.
+UPDATE agent_runtime
+SET last_recovered_boot_id = @boot_id, updated_at = now()
+WHERE id = @runtime_id
+  AND last_recovered_boot_id IS DISTINCT FROM @boot_id
 RETURNING *;
 
 -- name: ListAgentRuntimesByOwner :many

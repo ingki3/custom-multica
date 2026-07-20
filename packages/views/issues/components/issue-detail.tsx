@@ -429,8 +429,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
       )}
 
       {/* Dependencies */}
-      {(prerequisites.length > 0 || nextIssues.length > 0 || true) && (
-        <div>
+      <div>
           <button
             className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${dependenciesOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
             onClick={() => setDependenciesOpen(!dependenciesOpen)}
@@ -570,8 +569,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
               </div>
             </div>
           )}
-        </div>
-      )}
+      </div>
 
       {/* Details */}
       <div>

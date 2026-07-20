@@ -1,9 +1,19 @@
-export type WebhookEvent = "issue.status_changed";
+import type { TaskFailureReason } from "./agent";
+import type { IssueStatus } from "./issue";
+
+export type WebhookEvent =
+  | "issue.status_changed"
+  | "task.failed"
+  | "runtime.offline"
+  | "runtime.recovered"
+  | "server.ready";
 
 export interface WebhookFilters {
-  status_from?: string[];
-  status_to?: string[];
+  status_from?: IssueStatus[];
+  status_to?: IssueStatus[];
   source?: string[];
+  failure_reason?: TaskFailureReason[];
+  will_retry?: ("true" | "false")[];
 }
 
 export interface WorkspaceWebhook {

@@ -36,13 +36,25 @@ func classifyAgentFailure(provider, errMsg string) string {
 		return "context_limit"
 	}
 
-	if strings.Contains(s, "model") &&
-		(strings.Contains(s, "not available") ||
+	if strings.Contains(s, "model") {
+		if strings.Contains(s, "access denied") ||
+			strings.Contains(s, "not available for this account") ||
+			strings.Contains(s, "not available to your account") ||
+			strings.Contains(s, "do not have access") ||
+			strings.Contains(s, "don't have access") {
+			return "model_access"
+		}
+
+		if strings.Contains(s, "not found") ||
+			strings.Contains(s, "does not exist") {
+			return "model_not_found"
+		}
+
+		if strings.Contains(s, "not available") ||
 			strings.Contains(s, "unsupported") ||
-			strings.Contains(s, "not found") ||
-			strings.Contains(s, "does not exist") ||
-			strings.Contains(s, "not enabled")) {
-		return "model_limit"
+			strings.Contains(s, "not enabled") {
+			return "model_limit"
+		}
 	}
 
 	_ = provider // Reserved for provider-specific refinements.

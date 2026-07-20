@@ -15,6 +15,8 @@
 export function sanitizeNextUrl(raw: string | null): string | null {
   if (!raw) return null;
   if (!raw.startsWith("/") || raw.startsWith("//")) return null;
-  if (/[\x00-\x1f\\]/.test(raw)) return null;
+  for (const char of raw) {
+    if (char === "\\" || char.charCodeAt(0) <= 0x1f) return null;
+  }
   return raw;
 }

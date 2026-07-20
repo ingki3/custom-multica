@@ -21,13 +21,28 @@ export async function loginAsDefault(page: Page): Promise<string> {
   );
 
   const token = api.getToken();
-  await page.goto("/login");
-  await page.evaluate((t) => {
+  if (!token) throw new Error("E2E login returned no token");
+  const authToken: string = token;
+  // Install the legacy token before the first Multica document boots. The web
+  // provider chooses cookie-vs-token auth once at startup; setting localStorage
+  // after visiting /login leaves the already-initialized provider in cookie mode.
+  await page.addInitScript((t) => {
     localStorage.setItem("multica_token", t);
-  }, token);
+  }, authToken);
   await page.goto(`/${workspace.slug}/issues`);
   await page.waitForURL("**/issues", { timeout: 10000 });
+
+  // Keep the floating chat window from covering actions in unrelated specs.
+  // Chat behavior itself is covered by its component tests.
+  await minimizeChat(page);
   return workspace.slug;
+}
+
+export async function minimizeChat(page: Page) {
+  const button = page.getByRole("button", { name: "Minimize chat" });
+  if (await button.isVisible().catch(() => false)) {
+    await button.click();
+  }
 }
 
 /**
@@ -42,8 +57,8 @@ export async function createTestApi(): Promise<TestApiClient> {
 }
 
 export async function openWorkspaceMenu(page: Page) {
-  // Click the workspace switcher button (has ChevronDown icon)
-  await page.locator("aside button").first().click();
-  // Wait for dropdown to appear
-  await page.locator('[class*="popover"]').waitFor({ state: "visible" });
+  // The responsive sidebar no longer renders an <aside>; target the switcher
+  // by its accessible workspace name instead of DOM structure/CSS classes.
+  await page.getByRole("button", { name: "Workspace switcher" }).click();
+  await page.getByText("Log out", { exact: true }).waitFor({ state: "visible" });
 }

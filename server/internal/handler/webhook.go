@@ -107,7 +107,7 @@ func normalizeWebhookRequest(req webhookRequest) ([]byte, []byte, bool, error) {
 		events = []string{service.EventIssueStatusChanged}
 	}
 	for _, event := range events {
-		if event != service.EventIssueStatusChanged {
+		if !service.IsSupportedWebhookEvent(event) {
 			return nil, nil, false, errInvalidWebhookEvent
 		}
 	}
@@ -124,7 +124,28 @@ func normalizeWebhookRequest(req webhookRequest) ([]byte, []byte, bool, error) {
 	return eventsJSON, filtersJSON, enabled, nil
 }
 
+func normalizeWebhookUpdateRequest(req webhookRequest) ([]byte, []byte, error) {
+	var eventsJSON []byte
+	if req.Events != nil {
+		if len(req.Events) == 0 {
+			return nil, nil, errWebhookEventsRequired
+		}
+		for _, event := range req.Events {
+			if !service.IsSupportedWebhookEvent(event) {
+				return nil, nil, errInvalidWebhookEvent
+			}
+		}
+		eventsJSON, _ = json.Marshal(req.Events)
+	}
+	var filtersJSON []byte
+	if req.Filters != nil {
+		filtersJSON, _ = json.Marshal(req.Filters)
+	}
+	return eventsJSON, filtersJSON, nil
+}
+
 var errInvalidWebhookEvent = &webhookValidationError{"unsupported webhook event"}
+var errWebhookEventsRequired = &webhookValidationError{"at least one webhook event is required"}
 
 type webhookValidationError struct{ msg string }
 
@@ -235,7 +256,7 @@ func (h *Handler) UpdateWebhook(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	eventsJSON, filtersJSON, _, err := normalizeWebhookRequest(req)
+	eventsJSON, filtersJSON, err := normalizeWebhookUpdateRequest(req)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -358,10 +379,11 @@ func (h *Handler) TestWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 	eventUUID := uuid.Must(uuid.NewRandom()).String()
 	eventID := parseUUID(eventUUID)
-	payload := testWebhookPayload(workspaceID, eventUUID)
+	eventType := firstWebhookEvent(webhook.Events)
+	payload := testWebhookPayload(workspaceID, eventUUID, eventType)
 	raw, _ := json.Marshal(payload)
 	delivery, err := h.Queries.CreateWebhookDelivery(r.Context(), db.CreateWebhookDeliveryParams{
-		WebhookID: webhook.ID, WorkspaceID: webhook.WorkspaceID, EventType: service.EventIssueStatusChanged,
+		WebhookID: webhook.ID, WorkspaceID: webhook.WorkspaceID, EventType: eventType,
 		EventID: eventID, Payload: raw,
 	})
 	if err != nil {
@@ -374,15 +396,58 @@ func (h *Handler) TestWebhook(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, webhookDeliveryToResponse(delivery))
 }
 
-func testWebhookPayload(workspaceID, eventID string) map[string]any {
-	return map[string]any{
-		"event":      service.EventIssueStatusChanged,
-		"event_type": service.EventIssueStatusChanged,
-		"event_id":   eventID,
-		"workspace":  map[string]any{"id": workspaceID},
-		"issue":      map[string]any{"id": "test", "identifier": "TEST-1", "title": "Test webhook"},
-		"transition": map[string]any{"from": "in_progress", "to": "in_review", "source": "test", "occurred_at": timeNowRFC3339()},
+func firstWebhookEvent(raw []byte) string {
+	var events []string
+	if json.Unmarshal(raw, &events) == nil {
+		for _, eventType := range events {
+			if service.IsSupportedWebhookEvent(eventType) {
+				return eventType
+			}
+		}
 	}
+	return service.EventIssueStatusChanged
+}
+
+func testWebhookPayload(workspaceID, eventID, eventType string) map[string]any {
+	now := timeNowRFC3339()
+	payload := map[string]any{
+		"schema_version": 1,
+		"event":          eventType,
+		"event_type":     eventType,
+		"event_id":       eventID,
+		"occurred_at":    now,
+		"workspace":      map[string]any{"id": workspaceID, "slug": "test", "name": "Test workspace"},
+	}
+	switch eventType {
+	case service.EventTaskFailed:
+		payload["issue"] = map[string]any{"id": eventID, "identifier": "TEST-1", "title": "Test webhook", "status": "todo"}
+		payload["task"] = map[string]any{
+			"id": eventID, "agent_id": eventID, "runtime_id": eventID,
+			"attempt": 1, "max_attempts": 1, "failure_reason": "agent_error",
+			"error": "Test delivery", "will_retry": false, "retry_kind": "none",
+			"retry_task_id": nil, "completed_at": now,
+		}
+	case service.EventRuntimeOffline:
+		payload["runtime"] = map[string]any{"id": eventID, "provider": "test"}
+		payload["failed_task_count"] = 0
+		payload["affected_issue_count"] = 0
+		payload["affected_issues"] = []any{}
+	case service.EventRuntimeRecovered:
+		payload["runtime"] = map[string]any{"id": eventID, "provider": "test", "boot_id": eventID}
+		payload["orphan_count"] = 0
+		payload["retried_count"] = 0
+		payload["final_failure_count"] = 0
+		payload["affected_issue_count"] = 0
+		payload["affected_issues"] = []any{}
+	case service.EventServerReady:
+		payload["server"] = map[string]any{
+			"boot_id": eventID, "version": "test", "bind_address": "127.0.0.1:0", "started_at": now,
+		}
+	default:
+		payload["issue"] = map[string]any{"id": eventID, "identifier": "TEST-1", "title": "Test webhook"}
+		payload["transition"] = map[string]any{"from": "in_progress", "to": "in_review", "source": "test", "occurred_at": now}
+	}
+	return payload
 }
 
 func timeNowRFC3339() string {

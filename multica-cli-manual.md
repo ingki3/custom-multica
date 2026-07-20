@@ -1,6 +1,6 @@
 # Multica CLI Manual for AI Agents
 
-Last verified: 2026-07-04 against `go run ./cmd/multica --help` in `server/`.
+Last verified: 2026-07-19 against `go run ./cmd/multica --help` in `server/`.
 
 This file is optimized for AI agents operating in a Multica workspace. It focuses on safe, repeatable command usage, JSON-friendly workflows, and common pitfalls. Prefer this file over guessing CLI syntax. When in doubt, run `multica <command> --help` or, from this repository, `cd server && go run ./cmd/multica <command> --help`.
 
@@ -13,6 +13,7 @@ This file is optimized for AI agents operating in a Multica workspace. It focuse
 - For multiline issue/comment text, prefer `--description-stdin` or `--content-stdin` instead of shell-escaped strings.
 - For file attachments, pass local file paths only. `http://` and `https://` URLs are not accepted by `--attachment`.
 - Avoid retrying a failed `issue create` blindly after partial success. Check whether the issue was created first to avoid duplicates.
+- Never paste secrets, raw provider errors, stack traces, prompts, or logs into `issue remediate --reason`. Use a bounded, single-line operator-safe summary.
 - Use `--profile <name>` when operating a non-default local CLI profile. Profiles isolate config, daemon state, and workspace watches.
 - Use `--workspace-id <uuid>` or `MULTICA_WORKSPACE_ID=<uuid>` when the active workspace is ambiguous.
 
@@ -406,6 +407,44 @@ Rerun the current agent assignment:
 ```bash
 multica issue rerun <issue-id> --output json
 ```
+
+Atomically remediate a final failed task:
+
+```bash
+# Same-agent rerun.
+multica issue remediate <issue-id> \
+  --failed-task <failed-task-uuid> \
+  --action rerun \
+  --key <failed-task-uuid>:<failure-reason> \
+  --reason "Automatic recovery after final timeout failure" \
+  --output json
+
+# Reassign and rerun. --target-agent accepts a UUID or an agent name.
+multica issue remediate <issue-id> \
+  --failed-task <failed-task-uuid> \
+  --action reassign-rerun \
+  --target-agent "Fallback Agent" \
+  --key <failed-task-uuid>:<failure-reason> \
+  --reason "Automatic fallback after final model_limit failure" \
+  --output json
+
+# Block without creating a task when operator action is required.
+multica issue remediate <issue-id> \
+  --failed-task <failed-task-uuid> \
+  --action block \
+  --key <failed-task-uuid>:<failure-reason> \
+  --reason "Operator action required: refresh provider authentication" \
+  --output json
+```
+
+Remediation safety and error handling:
+
+- Use the final failed task's canonical UUID and a stable key, normally `<failed-task-id>:<failure-reason>`. Replaying the same key returns the existing remediation with `idempotent: true`; it does not create another task.
+- `--target-agent` is required only for `reassign-rerun`. The server rejects the failed task's same agent as an unsafe fallback target and rejects archived, offline, or runtime-less targets.
+- `--reason` is required, single-line, and limited to 500 Unicode characters. Summarize the operator decision; do not include raw errors or secrets.
+- JSON output is stable and contains `id`, `action`, `issue_id`, `created_task_id` (null for block), and `idempotent`.
+- Do not retry `active_task_exists` or `remediation_budget_exhausted`; re-fetch the issue and runs. A 404 means the failed task does not belong to the issue/workspace. A 422 indicates an invalid/non-failed task, unsafe reason/action, same-agent fallback, or an unavailable target agent. Correct operator input rather than retrying unchanged.
+- This command is the only safe automatic recovery mutation. Do not implement reassign-and-rerun as separate `issue assign` and `issue rerun` calls because another task can start between those operations.
 
 ## 6. Issue dependencies
 

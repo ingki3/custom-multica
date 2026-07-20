@@ -31,6 +31,31 @@ type TaskService struct {
 	WebhookService *WebhookService
 }
 
+type RetryKind string
+
+const (
+	RetryKindNone          RetryKind = "none"
+	RetryKindSameAgent     RetryKind = "same_agent"
+	RetryKindFallbackAgent RetryKind = "fallback_agent"
+)
+
+// FailureDisposition is the result of post-processing one freshly failed task.
+// A decided disposition has exactly one of WillRetry or FinalFailure set; when
+// DecisionError is non-nil both are false so callers cannot mistake an
+// incomplete retry/fallback decision for terminal exhaustion.
+type FailureDisposition struct {
+	Task         db.AgentTaskQueue
+	RetryTask    *db.AgentTaskQueue
+	RetryKind    RetryKind
+	WillRetry    bool
+	FinalFailure bool
+	// DecisionError means retry/fallback eligibility could not be decided
+	// (usually because a required DB read/write failed). Such a failure is
+	// deliberately neither retrying nor final: terminal user-visible effects
+	// and the public task.failed webhook must not misreport it as exhausted.
+	DecisionError error
+}
+
 type TaskWakeupNotifier interface {
 	NotifyTaskAvailable(runtimeID, taskID string)
 }
@@ -852,61 +877,10 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 
 	slog.Warn("task failed", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(task.IssueID), "error", errMsg, "failure_reason", failureReason)
 
-	// Fallback first for limit-shaped failures, then same-agent auto-retry for
-	// infrastructure-shaped failures (orphan, timeout, runtime_offline,
-	// runtime_recovery). Both helpers only trigger for issue/chat tasks.
-	retried, _ := s.MaybeFallbackFailedTask(ctx, task)
-	if retried == nil {
-		retried, _ = s.MaybeRetryFailedTask(ctx, task)
-	}
-
-	// Skip the per-failure system comment when we'll immediately retry —
-	// the new task will surface its own status to the user, and we don't
-	// want to spam the issue with "task timed out" messages on every
-	// daemon hiccup.
-	if errMsg != "" && task.IssueID.Valid && retried == nil {
-		s.createAgentComment(ctx, task.IssueID, task.AgentID, redact.Text(errMsg), "system", task.TriggerCommentID)
-	}
-
-	// Mirror the issue fallback for chat tasks: write an assistant
-	// chat_message tagged with the daemon-reported failure_reason so the
-	// conversation history shows what happened. Skip when auto-retry is
-	// pending (the new attempt will write its own outcome) — same guard as
-	// the issue path above.
-	if task.ChatSessionID.Valid && retried == nil {
-		if _, err := s.Queries.CreateChatMessage(ctx, db.CreateChatMessageParams{
-			ChatSessionID: task.ChatSessionID,
-			Role:          "assistant",
-			Content:       redact.Text(errMsg),
-			TaskID:        pgtype.UUID{Bytes: task.ID.Bytes, Valid: true},
-			FailureReason: pgtype.Text{String: failureReason, Valid: failureReason != ""},
-			ElapsedMs:     computeChatElapsedMs(task),
-		}); err != nil {
-			slog.Error("failed to save failure chat message",
-				"task_id", util.UUIDToString(task.ID),
-				"chat_session_id", util.UUIDToString(task.ChatSessionID),
-				"error", err)
-		} else if err := s.Queries.SetUnreadSinceIfNull(ctx, task.ChatSessionID); err != nil {
-			slog.Warn("failed to set unread_since on failure",
-				"chat_session_id", util.UUIDToString(task.ChatSessionID),
-				"error", err)
-		}
-	}
-
-	// Quick-create tasks: push a failure inbox notification to the
-	// requester so they can either retry or fall back to the advanced form
-	// without losing their original prompt. Skipped when an auto-retry is
-	// pending — the new attempt will write its own outcome.
-	if retried == nil {
-		if qc, ok := s.parseQuickCreateContext(task); ok {
-			s.notifyQuickCreateFailed(ctx, task, qc, errMsg)
-		}
-	}
-	// Reconcile agent status
-	s.ReconcileAgentStatus(ctx, task.AgentID)
-
-	// Broadcast
-	s.broadcastTaskEvent(ctx, protocol.EventTaskFailed, task)
+	// Persistence above must commit before retries, user-visible side effects,
+	// or events observe this failure. Every fresh-failure path shares this
+	// post-processing pipeline.
+	s.HandleFailedTasks(ctx, []db.AgentTaskQueue{task})
 
 	return &task, nil
 }
@@ -1032,7 +1006,8 @@ func (s *TaskService) RerunIssue(ctx context.Context, issueID pgtype.UUID, trigg
 }
 
 // HandleFailedTasks runs the post-failure side effects for a batch of
-// freshly-failed tasks: optional auto-retry, task:failed event broadcast,
+// freshly-failed tasks and returns one disposition per input: optional retry,
+// task:failed event broadcasts,
 // agent status reconciliation, and (when an issue has no remaining active
 // task and isn't being retried) resetting the issue back to todo so the
 // daemon can pick it up again.
@@ -1040,28 +1015,59 @@ func (s *TaskService) RerunIssue(ctx context.Context, issueID pgtype.UUID, trigg
 // All callers that surface a task as failed — sweepers, FailTask,
 // recover-orphans — funnel through here so the same UI-consistency
 // guarantees apply on every code path.
-func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTaskQueue) int {
+func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTaskQueue) []FailureDisposition {
 	if len(tasks) == 0 {
-		return 0
+		return nil
 	}
 
 	affectedAgents := make(map[string]pgtype.UUID)
-	processedIssues := make(map[string]bool)
-	retriedIssues := make(map[string]bool)
-	retried := 0
+	dispositions := make([]FailureDisposition, 0, len(tasks))
 
 	for _, t := range tasks {
-		// Fallback / auto-retry first so the issue stays in_progress rather
-		// than flapping todo → in_progress within a tick.
-		child, _ := s.MaybeFallbackFailedTask(ctx, t)
-		if child == nil {
-			child, _ = s.MaybeRetryFailedTask(ctx, t)
-		}
-		if child != nil {
-			retried++
-			if t.IssueID.Valid {
-				retriedIssues[util.UUIDToString(t.IssueID)] = true
+		claimedForProcessing := false
+		claimed, claimErr := s.Queries.ClaimTaskFailureProcessing(ctx, t.ID)
+		if claimErr == pgx.ErrNoRows {
+			if _, lookupErr := s.Queries.GetAgentTask(ctx, t.ID); lookupErr != pgx.ErrNoRows {
+				continue
 			}
+			// Preserve the decision-error disposition for a row that disappeared
+			// after a sweeper returned it. There is no durable row to claim or mark.
+		} else if claimErr != nil {
+			slog.Error("handle failed tasks: claim failed", "task_id", util.UUIDToString(t.ID), "error", claimErr)
+			continue
+		} else {
+			t = claimed
+			claimedForProcessing = true
+		}
+
+		kind := RetryKindNone
+		var child *db.AgentTaskQueue
+		var decisionErr error
+		if existing, existingErr := s.Queries.GetTaskChildByParent(ctx, t.ID); existingErr == nil {
+			child = &existing
+			kind = RetryKindFallbackAgent
+			if sameUUID(existing.AgentID, t.AgentID) {
+				kind = RetryKindSameAgent
+			}
+		} else if existingErr != pgx.ErrNoRows {
+			decisionErr = existingErr
+		} else {
+			kind = RetryKindFallbackAgent
+			child, decisionErr = s.MaybeFallbackFailedTask(ctx, t)
+			if child == nil && decisionErr == nil {
+				kind = RetryKindSameAgent
+				child, decisionErr = s.MaybeRetryFailedTask(ctx, t)
+			}
+		}
+		if child == nil {
+			kind = RetryKindNone
+		}
+		disposition := newFailureDisposition(t, child, kind)
+		if decisionErr != nil {
+			disposition.FinalFailure = false
+			disposition.DecisionError = decisionErr
+			slog.Error("handle failed tasks: retry disposition failed",
+				"task_id", util.UUIDToString(t.ID), "error", decisionErr)
 		}
 
 		failureReason := "agent_error"
@@ -1073,58 +1079,92 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 		if t.IssueID.Valid {
 			if issue, err := s.Queries.GetIssue(ctx, t.IssueID); err == nil {
 				workspaceID = util.UUIDToString(issue.WorkspaceID)
-				// Reset stuck in_progress issues only when no other active
-				// task exists for the issue and no retry was just enqueued.
-				issueKey := util.UUIDToString(t.IssueID)
-				if issue.Status == "in_progress" && !processedIssues[issueKey] && !retriedIssues[issueKey] {
-					processedIssues[issueKey] = true
+				if issue.Status == "in_progress" && disposition.FinalFailure {
+					issueKey := util.UUIDToString(t.IssueID)
 					hasActive, checkErr := s.Queries.HasActiveTaskForIssue(ctx, t.IssueID)
 					if checkErr != nil {
-						slog.Warn("handle failed tasks: active check failed",
-							"issue_id", issueKey,
-							"error", checkErr,
-						)
+						slog.Warn("handle failed tasks: active check failed", "issue_id", issueKey, "error", checkErr)
 					} else if !hasActive {
 						if _, _, updateErr := s.transitionIssueStatus(ctx, t.IssueID, "todo", StatusTransitionOptions{
-							Source: "task_failed",
-							Actor:  StatusTransitionActor{Type: "system"},
-							TaskID: t.ID,
+							Source: "task_failed", Actor: StatusTransitionActor{Type: "system"}, TaskID: t.ID,
 						}); updateErr != nil {
-							slog.Warn("handle failed tasks: reset stuck issue failed",
-								"issue_id", issueKey,
-								"error", updateErr,
-							)
+							slog.Warn("handle failed tasks: reset stuck issue failed", "issue_id", issueKey, "error", updateErr)
 						}
 					}
 				}
 			}
 		}
+
+		// Comments, chat messages, and quick-create inbox notifications describe
+		// terminal outcomes only; intermediate failures are represented by their
+		// queued replacement task and webhook disposition.
+		if disposition.FinalFailure {
+			errMsg := ""
+			if t.Error.Valid {
+				errMsg = t.Error.String
+			}
+			if errMsg != "" && t.IssueID.Valid {
+				s.createAgentComment(ctx, t.IssueID, t.AgentID, redact.Text(errMsg), "system", t.TriggerCommentID)
+			}
+			if t.ChatSessionID.Valid {
+				if _, err := s.Queries.CreateChatMessage(ctx, db.CreateChatMessageParams{
+					ChatSessionID: t.ChatSessionID,
+					Role:          "assistant",
+					Content:       redact.Text(errMsg),
+					TaskID:        pgtype.UUID{Bytes: t.ID.Bytes, Valid: true},
+					FailureReason: pgtype.Text{String: failureReason, Valid: failureReason != ""},
+					ElapsedMs:     computeChatElapsedMs(t),
+				}); err != nil {
+					slog.Error("failed to save failure chat message", "task_id", util.UUIDToString(t.ID), "error", err)
+				} else if err := s.Queries.SetUnreadSinceIfNull(ctx, t.ChatSessionID); err != nil {
+					slog.Warn("failed to set unread_since on failure", "chat_session_id", util.UUIDToString(t.ChatSessionID), "error", err)
+				}
+			}
+			if qc, ok := s.parseQuickCreateContext(t); ok {
+				s.notifyQuickCreateFailed(ctx, t, qc, errMsg)
+			}
+		}
+
 		if workspaceID == "" {
 			workspaceID = s.ResolveTaskWorkspaceID(ctx, t)
 		}
-
-		if workspaceID != "" {
-			s.Bus.Publish(events.Event{
-				Type:        protocol.EventTaskFailed,
-				WorkspaceID: workspaceID,
-				ActorType:   "system",
-				Payload: map[string]any{
-					"task_id":        util.UUIDToString(t.ID),
-					"agent_id":       util.UUIDToString(t.AgentID),
-					"issue_id":       util.UUIDToString(t.IssueID),
-					"status":         "failed",
-					"failure_reason": failureReason,
-				},
-			})
+		if workspaceID != "" && s.Bus != nil {
+			// Internal realtime is deliberately separate from the public dot-form
+			// operational webhook event.
+			s.broadcastTaskFailureEvent(ctx, disposition)
+			// Build after retry and issue rollback decisions, ensuring consumers
+			// receive the current issue status and final retry disposition exactly once.
+			// A failed retry/fallback DB operation is not a final disposition; keep
+			// the internal lifecycle signal but do not publish a misleading public
+			// task.failed envelope.
+			if disposition.DecisionError == nil {
+				if payload, ok := s.BuildTaskFailedPayload(ctx, disposition); ok {
+					s.Bus.Publish(events.Event{
+						Type: EventTaskFailed, WorkspaceID: workspaceID, ActorType: "system",
+						TaskID: util.UUIDToString(t.ID), Payload: payload,
+					})
+				}
+			}
 		}
 
 		affectedAgents[util.UUIDToString(t.AgentID)] = t.AgentID
+		dispositions = append(dispositions, disposition)
+		if !claimedForProcessing {
+			continue
+		}
+		if disposition.DecisionError == nil {
+			if err := s.Queries.MarkTaskFailureHandled(ctx, t.ID); err != nil {
+				slog.Error("handle failed tasks: mark handled failed", "task_id", util.UUIDToString(t.ID), "error", err)
+			}
+		} else if err := s.Queries.ReleaseTaskFailureProcessing(ctx, t.ID); err != nil {
+			slog.Error("handle failed tasks: release claim failed", "task_id", util.UUIDToString(t.ID), "error", err)
+		}
 	}
 
 	for _, agentID := range affectedAgents {
 		s.ReconcileAgentStatus(ctx, agentID)
 	}
-	return retried
+	return dispositions
 }
 
 // runInTx executes fn inside a single DB transaction. If TxStarter is nil
@@ -1310,12 +1350,32 @@ func (s *TaskService) broadcastTaskEvent(ctx context.Context, eventType string, 
 	if task.ChatSessionID.Valid {
 		payload["chat_session_id"] = util.UUIDToString(task.ChatSessionID)
 	}
+	if eventType == protocol.EventTaskFailed {
+		failureReason := "agent_error"
+		if task.FailureReason.Valid && task.FailureReason.String != "" {
+			failureReason = task.FailureReason.String
+		}
+		payload["failure_reason"] = failureReason
+	}
 	s.Bus.Publish(events.Event{
 		Type:        eventType,
 		WorkspaceID: workspaceID,
 		ActorType:   "system",
 		ActorID:     "",
 		Payload:     payload,
+	})
+}
+
+func (s *TaskService) broadcastTaskFailureEvent(ctx context.Context, disposition FailureDisposition) {
+	workspaceID := s.ResolveTaskWorkspaceID(ctx, disposition.Task)
+	if workspaceID == "" {
+		return
+	}
+	s.Bus.Publish(events.Event{
+		Type:        protocol.EventTaskFailed,
+		WorkspaceID: workspaceID,
+		ActorType:   "system",
+		Payload:     buildTaskFailureRealtimePayload(disposition),
 	})
 }
 

@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/multica-ai/multica/server/internal/cli"
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
@@ -45,6 +46,7 @@ type Daemon struct {
 	client    *Client
 	repoCache *repocache.Cache
 	logger    *slog.Logger
+	bootID    string // stable UUID for this daemon process lifecycle
 
 	mu           sync.Mutex
 	workspaces   map[string]*workspaceState
@@ -85,6 +87,7 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 		client:             client,
 		repoCache:          repocache.New(cacheRoot, logger),
 		logger:             logger,
+		bootID:             uuid.NewString(),
 		workspaces:         make(map[string]*workspaceState),
 		runtimeIndex:       make(map[string]Runtime),
 		runtimeSetCh:       make(chan struct{}, 1),
@@ -562,7 +565,7 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context) error {
 		// at in_progress until the slow heartbeat sweeper or the in-flight
 		// task timeout (2.5h) kicks in.
 		for _, rid := range runtimeIDs {
-			if err := d.client.RecoverOrphans(ctx, rid); err != nil {
+			if err := d.client.RecoverOrphans(ctx, rid, d.bootID); err != nil {
 				d.logger.Warn("recover-orphans failed", "runtime_id", rid, "error", err)
 			}
 		}

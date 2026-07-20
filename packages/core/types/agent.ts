@@ -33,6 +33,8 @@ export type TaskFailureReason =
   | "quota_exceeded"
   | "context_limit"
   | "model_limit"
+  | "model_access"
+  | "model_not_found"
   | "timeout"
   | "runtime_offline"
   | "runtime_recovery"

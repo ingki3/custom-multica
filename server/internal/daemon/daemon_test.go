@@ -140,9 +140,39 @@ func TestClassifyAgentFailure(t *testing.T) {
 			want:     "context_limit",
 		},
 		{
-			name:     "model unavailable",
+			name:     "model unavailable for account",
 			provider: "codex",
 			errMsg:   "model gpt-5.5-pro is not available for this account",
+			want:     "model_access",
+		},
+		{
+			name:     "selected model access denied",
+			provider: "codex",
+			errMsg:   "selected model (gpt-5.6-sol) may not exist or access denied",
+			want:     "model_access",
+		},
+		{
+			name:     "model does not exist",
+			provider: "codex",
+			errMsg:   "model gpt-5.6-sol does not exist",
+			want:     "model_not_found",
+		},
+		{
+			name:     "model not found",
+			provider: "claude",
+			errMsg:   "404: requested model claude-future was not found",
+			want:     "model_not_found",
+		},
+		{
+			name:     "unsupported model remains model limit",
+			provider: "codex",
+			errMsg:   "model gpt-legacy is unsupported",
+			want:     "model_limit",
+		},
+		{
+			name:     "model not enabled remains model limit",
+			provider: "codex",
+			errMsg:   "model gpt-preview is not enabled",
 			want:     "model_limit",
 		},
 		{

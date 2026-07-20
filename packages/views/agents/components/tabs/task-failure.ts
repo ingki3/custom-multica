@@ -14,6 +14,8 @@ export const failureReasonLabel: Record<TaskFailureReason, string> = {
   quota_exceeded: "Quota exceeded",
   context_limit: "Context limit reached",
   model_limit: "Model unavailable",
+  model_access: "Model access denied",
+  model_not_found: "Model not found",
   timeout: "Task timed out",
   runtime_offline: "Daemon offline",
   runtime_recovery: "Daemon restarted",

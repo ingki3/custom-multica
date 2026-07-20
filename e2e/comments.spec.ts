@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { createTestApi, loginAsDefault } from "./helpers";
+import { createTestApi, loginAsDefault, minimizeChat } from "./helpers";
 import type { TestApiClient } from "./fixtures";
 
 test.describe("Comments", () => {
@@ -25,16 +25,15 @@ test.describe("Comments", () => {
 
     // Wait for issue detail to load
     await expect(page.locator("text=Properties")).toBeVisible();
+    await minimizeChat(page);
 
     // Type a comment
     const commentText = "E2E comment " + Date.now();
-    const commentInput = page.locator(
-      'input[placeholder="Leave a comment..."]',
-    );
+    const commentInput = page.getByRole("textbox", { name: "Leave a comment..." });
     await commentInput.fill(commentText);
 
     // Submit the comment
-    await page.locator('form button[type="submit"]').last().click();
+    await page.getByRole("button", { name: "Submit comment" }).click();
 
     // Comment should appear in the activity section
     await expect(page.locator(`text=${commentText}`)).toBeVisible({
@@ -49,9 +48,10 @@ test.describe("Comments", () => {
     await page.waitForURL(/\/issues\/[\w-]+/);
 
     await expect(page.locator("text=Properties")).toBeVisible();
+    await minimizeChat(page);
 
     // Submit button should be disabled when input is empty
-    const submitBtn = page.locator('form button[type="submit"]').last();
+    const submitBtn = page.getByRole("button", { name: "Submit comment" });
     await expect(submitBtn).toBeDisabled();
   });
 });

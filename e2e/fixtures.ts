@@ -73,6 +73,21 @@ export class TestApiClient {
         });
       }
 
+      // E2E exercises the workspace application, not the first-run marketing
+      // flow. Existing databases may contain an E2E user created before the
+      // onboarding guard was introduced, so normalize it on every login.
+      await client.query(
+        `UPDATE "user"
+         SET onboarded_at = COALESCE(onboarded_at, now()),
+             starter_content_state = CASE
+               WHEN starter_content_state IS NULL OR starter_content_state = 'pending'
+                 THEN 'skipped_legacy'
+               ELSE starter_content_state
+             END
+         WHERE email = $1`,
+        [email],
+      );
+
       await client.query("DELETE FROM verification_code WHERE email = $1", [email]);
 
       return data;
