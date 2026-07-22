@@ -64,7 +64,18 @@ func filterCodexShellEnvConfigOverrides(args []string, logger *slog.Logger) []st
 		flag := arg
 		inlineValue := ""
 		hasInlineValue := false
-		if idx := strings.Index(arg, "="); idx > 0 {
+		if strings.HasPrefix(arg, "-c=") {
+			flag = "-c"
+			inlineValue = arg[len("-c="):]
+			hasInlineValue = true
+		} else if strings.HasPrefix(arg, "-c") && arg != "-c" && !strings.HasPrefix(arg, "--") {
+			// Codex/clap accepts an attached short-option value (`-cVALUE`).
+			// Normalize it before inspecting the managed config namespace so this
+			// compact spelling cannot bypass the daemon-owned shell policy.
+			flag = "-c"
+			inlineValue = arg[len("-c"):]
+			hasInlineValue = true
+		} else if idx := strings.Index(arg, "="); idx > 0 {
 			flag = arg[:idx]
 			inlineValue = arg[idx+1:]
 			hasInlineValue = true

@@ -1326,9 +1326,11 @@ func TestFilterCodexShellEnvConfigOverrides(t *testing.T) {
 		want []string
 	}{
 		{name: "root policy override", in: []string{"-c", `shell_environment_policy.include_only=["PATH"]`, "-c", `model="o3"`}, want: []string{"-c", `model="o3"`}},
+		{name: "compact root policy override", in: []string{`-cshell_environment_policy.include_only=["PATH"]`, "--sandbox", "workspace-write"}, want: []string{"--sandbox", "workspace-write"}},
+		{name: "compact profile policy override", in: []string{`-cprofiles.work.shell_environment_policy.inherit="all"`}, want: []string{}},
 		{name: "profile policy override", in: []string{`--config=profiles.work.shell_environment_policy.ignore_default_excludes=false`, "--sandbox", "workspace-write"}, want: []string{"--sandbox", "workspace-write"}},
 		{name: "quoted policy key", in: []string{"--config", `profiles.work."shell_environment_policy".inherit="none"`}, want: []string{}},
-		{name: "unrelated override survives", in: []string{"-c", `model="o3"`, "-c", `profiles.work.model="gpt-5.6"`, "-c", `tools.shell_environment_policy="metadata"`}, want: []string{"-c", `model="o3"`, "-c", `profiles.work.model="gpt-5.6"`, "-c", `tools.shell_environment_policy="metadata"`}},
+		{name: "unrelated override survives", in: []string{"-c", `model="o3"`, `-cmodel="o4"`, "-c", `profiles.work.model="gpt-5.6"`, "-c", `tools.shell_environment_policy="metadata"`}, want: []string{"-c", `model="o3"`, `-cmodel="o4"`, "-c", `profiles.work.model="gpt-5.6"`, "-c", `tools.shell_environment_policy="metadata"`}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
