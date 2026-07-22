@@ -75,3 +75,23 @@ func TestWSHeartbeatFreshnessSuppressesHTTP(t *testing.T) {
 		t.Fatalf("expected clearWSHeartbeatAcks to drop all entries")
 	}
 }
+
+func TestWSWriteQueueCapacityHoldsAFullRuntimeHeartbeatBatch(t *testing.T) {
+	tests := []struct {
+		name         string
+		runtimeCount int
+		want         int
+	}{
+		{name: "minimum headroom", runtimeCount: 1, want: 8},
+		{name: "existing eight-runtime batch", runtimeCount: 8, want: 8},
+		{name: "all configured runtimes", runtimeCount: 12, want: 12},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := wsWriteQueueCapacity(tt.runtimeCount); got != tt.want {
+				t.Fatalf("wsWriteQueueCapacity(%d) = %d, want %d", tt.runtimeCount, got, tt.want)
+			}
+		})
+	}
+}
