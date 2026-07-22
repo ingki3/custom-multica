@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -38,9 +39,59 @@ type codexBackend struct {
 
 func buildCodexArgs(opts ExecOptions, logger *slog.Logger) []string {
 	args := []string{"app-server", "--listen", "stdio://"}
-	args = append(args, filterCustomArgs(opts.ExtraArgs, codexBlockedArgs, logger)...)
-	args = append(args, filterCustomArgs(opts.CustomArgs, codexBlockedArgs, logger)...)
+	extra := filterCustomArgs(opts.ExtraArgs, codexBlockedArgs, logger)
+	custom := filterCustomArgs(opts.CustomArgs, codexBlockedArgs, logger)
+	args = append(args, filterCodexShellEnvConfigOverrides(extra, logger)...)
+	args = append(args, filterCodexShellEnvConfigOverrides(custom, logger)...)
 	return args
+}
+
+const (
+	codexShellEnvPolicyKeyPattern = `(?:shell_environment_policy|"shell_environment_policy"|'shell_environment_policy')`
+	codexProfileNameKeyPattern    = `(?:[A-Za-z0-9_-]+|"[^"]+"|'[^']+')`
+)
+
+var codexManagedShellEnvConfigKeyRe = regexp.MustCompile(
+	`^\s*(?:` + codexShellEnvPolicyKeyPattern + `|profiles\s*\.\s*` + codexProfileNameKeyPattern + `\s*\.\s*` + codexShellEnvPolicyKeyPattern + `)\s*(?:\.|=|$)`)
+
+func filterCodexShellEnvConfigOverrides(args []string, logger *slog.Logger) []string {
+	if len(args) == 0 {
+		return args
+	}
+	filtered := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		flag := arg
+		inlineValue := ""
+		hasInlineValue := false
+		if idx := strings.Index(arg, "="); idx > 0 {
+			flag = arg[:idx]
+			inlineValue = arg[idx+1:]
+			hasInlineValue = true
+		}
+		if flag == "-c" || flag == "--config" {
+			value := inlineValue
+			if !hasInlineValue && i+1 < len(args) {
+				value = args[i+1]
+			}
+			if codexManagedShellEnvConfigKeyRe.MatchString(value) {
+				if logger != nil {
+					key := value
+					if eqIdx := strings.Index(value, "="); eqIdx >= 0 {
+						key = value[:eqIdx]
+					}
+					logger.Warn("custom_args: blocked managed Codex config override",
+						"namespace", "shell_environment_policy", "flag", flag, "key", strings.TrimSpace(key))
+				}
+				if !hasInlineValue && i+1 < len(args) {
+					i++
+				}
+				continue
+			}
+		}
+		filtered = append(filtered, arg)
+	}
+	return filtered
 }
 
 func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOptions) (*Session, error) {

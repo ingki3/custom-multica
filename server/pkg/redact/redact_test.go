@@ -40,10 +40,53 @@ func TestRedactPrivateKey(t *testing.T) {
 
 func TestRedactGitHubToken(t *testing.T) {
 	t.Parallel()
-	input := "export GITHUB_TOKEN=ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmn"
+	input := "export GITHUB_TOKEN=" + strings.Join([]string{"gh", "p_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmn"}, "")
 	got := Text(input)
 	if strings.Contains(got, "ghp_") {
 		t.Fatalf("GitHub token not redacted: %s", got)
+	}
+}
+
+func asm(parts ...string) string { return strings.Join(parts, "") }
+
+func TestRedactAdditionalCredentialFormats(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name        string
+		input       string
+		placeholder string
+		leak        string
+	}{
+		{name: "GitHub fine-grained PAT", input: asm("github_", "pat_", "11ABCDE0Q0abcdefghijkl_MNOPQRSTUVWXYZ0123456789abcdefghijklmnopqrstuvwxyzABCD"), placeholder: "[REDACTED GITHUB TOKEN]", leak: asm("github_", "pat_", "11ABCDE0Q0")},
+		{name: "Slack app token", input: asm("xa", "pp-1-A0000000000-1111111111-abcdefdeadbeefcafe"), placeholder: "[REDACTED SLACK TOKEN]", leak: asm("xa", "pp-1-A0000000000")},
+		{name: "Slack config token", input: asm("xo", "xe-1-My0abcdefghijklmnopqrstuvwx"), placeholder: "[REDACTED SLACK TOKEN]", leak: asm("xo", "xe-1-My0abcdef")},
+		{name: "Google API key", input: asm("AIza", "SyD1234567890abcdefghijklmnopqrstuv"), placeholder: "[REDACTED GOOGLE API KEY]", leak: asm("AIza", "SyD1234567890")},
+		{name: "Stripe live secret", input: asm("sk_", "live_", "51Abcdef0000000000000000"), placeholder: "[REDACTED STRIPE KEY]", leak: asm("sk_", "live_51Abcdef")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := Text("credential=" + tt.input)
+			if strings.Contains(got, tt.leak) || !strings.Contains(got, tt.placeholder) {
+				t.Fatalf("credential was not safely redacted: %s", got)
+			}
+		})
+	}
+}
+
+func TestRedactGoogleAPIKeyEndingWithDashPreservesDelimiter(t *testing.T) {
+	t.Parallel()
+	input := `the config had "` + asm("AIza", "SyB1cD3fGhIjKlMnOpQrStUvWxYz012345-") + `" in it`
+	got := Text(input)
+	if !strings.Contains(got, `"[REDACTED GOOGLE API KEY]" in it`) {
+		t.Fatalf("delimiter was not preserved: %s", got)
+	}
+}
+
+func TestStripePublishableKeyIsNotRedacted(t *testing.T) {
+	t.Parallel()
+	key := asm("pk_", "live_", "51Abcdef0000000000000000")
+	if got := Text(key); got != key {
+		t.Fatalf("publishable key should not be redacted: %s", got)
 	}
 }
 

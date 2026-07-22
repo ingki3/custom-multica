@@ -21,8 +21,33 @@ describe("redactSecrets", () => {
   });
 
   it("redacts GitHub tokens", () => {
-    const result = redactSecrets("GITHUB_TOKEN=ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmn");
+    const key = ["gh", "p_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmn"].join("");
+    const result = redactSecrets(`GITHUB_TOKEN=${key}`);
     expect(result).not.toContain("ghp_");
+  });
+
+  it("redacts additional credential formats", () => {
+    const cases = [
+      [["github_", "pat_", "11ABCDEFG0aBcDeFgHiJkL_mNoPqRsTuVwXyZ0123456789AbCdEfGhIjKlMnOpQrSt"].join(""), "[REDACTED GITHUB TOKEN]"],
+      [["AIza", "SyD1234567890abcdefghijklmnopqrstuv"].join(""), "[REDACTED GOOGLE API KEY]"],
+      [["xa", "pp-1-A0000000000-1111111111-abcdefdeadbeefcafe"].join(""), "[REDACTED SLACK TOKEN]"],
+      [["sk_", "live_", "51Abcdef0000000000000000"].join(""), "[REDACTED STRIPE KEY]"],
+    ] as const;
+    for (const [key, placeholder] of cases) {
+      const result = redactSecrets(`credential=${key}`);
+      expect(result).not.toContain(key);
+      expect(result).toContain(placeholder);
+    }
+  });
+
+  it("redacts Google API keys ending with dash and preserves the delimiter", () => {
+    const key = ["AIza", "SyB1cD3fGhIjKlMnOpQrStUvWxYz012345-"].join("");
+    expect(redactSecrets(`"${key}" in it`)).toContain('"[REDACTED GOOGLE API KEY]" in it');
+  });
+
+  it("does not redact Stripe publishable keys", () => {
+    const key = ["pk_", "live_", "51Abcdef0000000000000000"].join("");
+    expect(redactSecrets(key)).toBe(key);
   });
 
   it("redacts GitLab tokens", () => {

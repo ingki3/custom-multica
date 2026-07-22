@@ -21,14 +21,14 @@ func TestNewReturnsCursorBackend(t *testing.T) {
 func TestBuildCursorArgs(t *testing.T) {
 	t.Parallel()
 
-	args := buildCursorArgs("do something", ExecOptions{
+	args := buildCursorArgs(ExecOptions{
 		Cwd:   "/tmp/work",
 		Model: "composer-1.5",
 	}, slog.Default())
 
 	expected := []string{
 		"chat",
-		"-p", "do something",
+		"-p",
 		"--output-format", "stream-json",
 		"--yolo",
 		"--workspace", "/tmp/work",
@@ -48,7 +48,7 @@ func TestBuildCursorArgs(t *testing.T) {
 func TestBuildCursorArgsWithResume(t *testing.T) {
 	t.Parallel()
 
-	args := buildCursorArgs("continue", ExecOptions{
+	args := buildCursorArgs(ExecOptions{
 		ResumeSessionID: "sess-123",
 	}, slog.Default())
 
@@ -66,8 +66,8 @@ func TestBuildCursorArgsWithResume(t *testing.T) {
 func TestBuildCursorArgsMinimal(t *testing.T) {
 	t.Parallel()
 
-	args := buildCursorArgs("hello", ExecOptions{}, slog.Default())
-	expected := []string{"chat", "-p", "hello", "--output-format", "stream-json", "--yolo"}
+	args := buildCursorArgs(ExecOptions{}, slog.Default())
+	expected := []string{"chat", "-p", "--output-format", "stream-json", "--yolo"}
 
 	if len(args) != len(expected) {
 		t.Fatalf("expected %d args, got %d: %v", len(expected), len(args), args)
@@ -79,7 +79,7 @@ func TestBuildCursorArgsIgnoresSystemPromptAndMaxTurns(t *testing.T) {
 
 	// cursor-agent CLI does not support --system-prompt or --max-turns;
 	// verify they are NOT emitted even when set in ExecOptions.
-	args := buildCursorArgs("task", ExecOptions{
+	args := buildCursorArgs(ExecOptions{
 		SystemPrompt: "You are helpful",
 		MaxTurns:     5,
 	}, slog.Default())
@@ -97,7 +97,7 @@ func TestBuildCursorArgsIgnoresSystemPromptAndMaxTurns(t *testing.T) {
 func TestBuildCursorArgsCustomArgs(t *testing.T) {
 	t.Parallel()
 
-	args := buildCursorArgs("task", ExecOptions{
+	args := buildCursorArgs(ExecOptions{
 		CustomArgs: []string{"--extra", "val", "--yolo", "--output-format", "text"},
 	}, slog.Default())
 

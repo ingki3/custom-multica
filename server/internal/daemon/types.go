@@ -53,6 +53,12 @@ type Task struct {
 	FallbackParentTaskID             string          `json:"fallback_parent_task_id,omitempty"`             // parent task that failed and spawned this fallback
 	FallbackSourceAgentID            string          `json:"fallback_source_agent_id,omitempty"`            // original agent from the failed parent task
 	FallbackReason                   string          `json:"fallback_reason,omitempty"`                     // failure_reason that triggered fallback
+	// AuthToken is the task-scoped credential the server mints at claim time.
+	// The daemon injects it into the spawned agent as MULTICA_TOKEN so the
+	// agent never sees the daemon's own (often workspace-owner) credential.
+	// Empty or non-task-scoped values are fatal for writable agent tasks; the
+	// daemon must not fall back to its own token.
+	AuthToken string `json:"auth_token,omitempty"`
 }
 
 // AgentData holds agent details returned by the claim endpoint.

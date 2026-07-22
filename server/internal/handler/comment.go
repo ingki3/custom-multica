@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -174,6 +175,11 @@ type CreateCommentRequest struct {
 	AttachmentIDs []string `json:"attachment_ids"`
 }
 
+func sanitizeCommentContent(content string) string {
+	content = strings.ReplaceAll(content, "\x00", "")
+	return strings.ToValidUTF8(content, "")
+}
+
 func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	issueID := chi.URLParam(r, "id")
 	issue, ok := h.loadIssueForUser(w, r, issueID)
@@ -191,6 +197,7 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
+	req.Content = sanitizeCommentContent(req.Content)
 
 	if req.Content == "" {
 		writeError(w, http.StatusBadRequest, "content is required")
@@ -542,6 +549,7 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
+	req.Content = sanitizeCommentContent(req.Content)
 	if req.Content == "" {
 		writeError(w, http.StatusBadRequest, "content is required")
 		return

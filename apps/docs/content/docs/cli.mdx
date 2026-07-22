@@ -17,6 +17,14 @@ multica login
 
 Your browser opens automatically. After you approve in the web app, the CLI saves the PAT (prefixed with `mul_`) to `~/.multica/config.json`. Every subsequent command authenticates with that PAT.
 
+<Callout type="info">
+Daemon-managed agents do not receive this owner PAT. Each claimed task receives
+a short-lived, task-scoped `mat_` token through `MULTICA_TOKEN`; commands run in
+an agent task fail closed if that token is missing or has another token type.
+The CLI never falls back to the saved profile PAT from an agent execution
+context.
+</Callout>
+
 <Callout type="tip">
 For CI or headless environments, skip the browser flow: create a PAT in the web app under **Settings → Personal Access Tokens**, then run `multica login --token <mul_...>` to supply it directly.
 </Callout>
