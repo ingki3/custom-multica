@@ -5,10 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"os/exec"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -36,7 +38,7 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	}
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 
-	args := buildCursorArgs(prompt, opts, b.cfg.Logger)
+	args := buildCursorArgs(opts, b.cfg.Logger)
 	argv0, cmdArgs := chooseCursorInvocation(execName, lookedUp, args, b.cfg.Logger)
 
 	cmd := exec.CommandContext(runCtx, argv0, cmdArgs...)
@@ -53,9 +55,17 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		cancel()
 		return nil, fmt.Errorf("cursor stdout pipe: %w", err)
 	}
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("cursor stdin pipe: %w", err)
+	}
+	var closeStdinOnce sync.Once
+	closeStdin := func() { closeStdinOnce.Do(func() { _ = stdin.Close() }) }
 	cmd.Stderr = newLogWriter(b.cfg.Logger, "[cursor:stderr] ")
 
 	if err := cmd.Start(); err != nil {
+		closeStdin()
 		cancel()
 		return nil, fmt.Errorf("start cursor-agent: %w", err)
 	}
@@ -64,6 +74,12 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 
 	msgCh := make(chan Message, 256)
 	resCh := make(chan Result, 1)
+	writeErrCh := make(chan error, 1)
+	go func() {
+		_, err := io.WriteString(stdin, prompt)
+		closeStdin()
+		writeErrCh <- err
+	}()
 
 	go func() {
 		defer cancel()
@@ -73,6 +89,7 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		// Close stdout when the context is cancelled so scanner.Scan() unblocks.
 		go func() {
 			<-runCtx.Done()
+			closeStdin()
 			_ = stdout.Close()
 		}()
 
@@ -81,6 +98,7 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		var sessionID string
 		finalStatus := "completed"
 		var finalError string
+		resultSeen := false
 		// stepUsage accumulates per-step token counts from "step_finish" events.
 		// resultUsage holds authoritative session totals from "result" events.
 		// If the result event includes usage, we use resultUsage exclusively;
@@ -143,6 +161,7 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				})
 
 			case "result":
+				resultSeen = true
 				if evt.IsError || evt.Subtype == "error" {
 					finalStatus = "failed"
 					finalError = cursorErrorText(&evt)
@@ -156,6 +175,7 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				}
 
 			case "error":
+				finalStatus = "failed"
 				errMsg := cursorErrorText(&evt)
 				if errMsg != "" {
 					finalError = errMsg
@@ -195,7 +215,9 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			resultUsage = stepUsage
 		}
 
+		scanErr := scanner.Err()
 		exitErr := cmd.Wait()
+		writeErr := <-writeErrCh
 		duration := time.Since(startTime)
 
 		if runCtx.Err() == context.DeadlineExceeded {
@@ -204,9 +226,21 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		} else if runCtx.Err() == context.Canceled {
 			finalStatus = "aborted"
 			finalError = "execution cancelled"
+		} else if scanErr != nil && finalStatus == "completed" {
+			finalStatus = "failed"
+			finalError = fmt.Sprintf("cursor-agent stream read failed: %v", scanErr)
+		} else if writeErr != nil && finalStatus == "completed" {
+			finalStatus = "failed"
+			finalError = fmt.Sprintf("cursor-agent prompt write failed: %v", writeErr)
 		} else if exitErr != nil && finalStatus == "completed" {
 			finalStatus = "failed"
 			finalError = fmt.Sprintf("cursor-agent exited with error: %v", exitErr)
+		} else if !resultSeen && finalStatus == "completed" {
+			finalStatus = "failed"
+			finalError = "cursor-agent stream ended without a terminal result"
+		}
+		if finalStatus != "completed" {
+			output.Reset()
 		}
 
 		b.cfg.Logger.Info("cursor-agent finished", "pid", cmd.Process.Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
@@ -396,13 +430,16 @@ var cursorBlockedArgs = map[string]blockedArgMode{
 
 // buildCursorArgs assembles the argv for a one-shot cursor-agent invocation.
 //
-// Usage: cursor-agent chat -p <prompt> --output-format stream-json
+// Usage: cursor-agent chat -p --output-format stream-json
 //
 //	--workspace <cwd> --yolo [--model <m>] [--resume <id>]
-func buildCursorArgs(prompt string, opts ExecOptions, logger *slog.Logger) []string {
+//
+// The prompt is deliberately sent through stdin rather than argv so Windows
+// launchers cannot re-tokenize CLI-like content embedded in user prompts.
+func buildCursorArgs(opts ExecOptions, logger *slog.Logger) []string {
 	args := []string{
 		"chat",
-		"-p", prompt,
+		"-p",
 		"--output-format", "stream-json",
 		"--yolo",
 	}

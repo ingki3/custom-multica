@@ -26,17 +26,26 @@ var patterns = []secretPattern{
 	// PEM private keys (multi-line)
 	{regexp.MustCompile(`(?s)-----BEGIN[A-Z\s]*PRIVATE KEY-----.*?-----END[A-Z\s]*PRIVATE KEY-----`), "[REDACTED PRIVATE KEY]"},
 
-	// GitHub tokens (classic PAT, fine-grained, OAuth, etc.)
+	// GitHub tokens (classic PAT, OAuth, user-to-server, server-to-server, refresh)
 	{regexp.MustCompile(`\b(ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9_]{36,255}\b`), "[REDACTED GITHUB TOKEN]"},
+	{regexp.MustCompile(`\bgithub_pat_[A-Za-z0-9_]{20,255}\b`), "[REDACTED GITHUB TOKEN]"},
 
 	// OpenAI / Anthropic API keys
 	{regexp.MustCompile(`\bsk-[A-Za-z0-9_-]{20,}\b`), "[REDACTED API KEY]"},
 
-	// Slack tokens
-	{regexp.MustCompile(`\bxox[bporas]-[A-Za-z0-9\-]{10,}\b`), "[REDACTED SLACK TOKEN]"},
+	// Slack bot/user/legacy/config and app-level tokens.
+	{regexp.MustCompile(`\bxox[bporase]-[A-Za-z0-9\-]{10,}\b`), "[REDACTED SLACK TOKEN]"},
+	{regexp.MustCompile(`\bxapp-[A-Za-z0-9-]{10,}\b`), "[REDACTED SLACK TOKEN]"},
 
 	// GitLab personal access tokens
 	{regexp.MustCompile(`\bglpat-[A-Za-z0-9_-]{20,}\b`), "[REDACTED GITLAB TOKEN]"},
+
+	// Google API keys are exactly AIza plus 35 URL-safe characters. Capture
+	// and restore the delimiter so keys ending in '-' are still redacted.
+	{regexp.MustCompile(`\bAIza[0-9A-Za-z_-]{35}([^0-9A-Za-z_-]|$)`), "[REDACTED GOOGLE API KEY]$1"},
+
+	// Stripe live secret/restricted keys. Publishable pk_live_ keys are public.
+	{regexp.MustCompile(`\b(?:sk|rk)_live_[0-9A-Za-z]{16,}\b`), "[REDACTED STRIPE KEY]"},
 
 	// JWT tokens (three base64url segments)
 	{regexp.MustCompile(`\bey[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b`), "[REDACTED JWT]"},

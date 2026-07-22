@@ -123,6 +123,9 @@ export function childIssuesOptions(wsId: string, id: string) {
   return queryOptions({
     queryKey: issueKeys.children(wsId, id),
     queryFn: () => api.listChildIssues(id).then((r) => r.issues),
+    // Child creation can happen while another workspace owns the realtime
+    // subscription. Always heal a cached snapshot when detail mounts again.
+    refetchOnMount: "always",
   });
 }
 

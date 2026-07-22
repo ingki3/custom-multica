@@ -29,6 +29,11 @@ func classifyAgentFailure(provider, errMsg string) string {
 		return "quota_exceeded"
 	}
 
+	if strings.Contains(s, "connection closed mid-response") ||
+		strings.Contains(s, "stream disconnected before completion") {
+		return "provider_network"
+	}
+
 	if strings.Contains(s, "context length") ||
 		strings.Contains(s, "maximum context") ||
 		strings.Contains(s, "context window") ||

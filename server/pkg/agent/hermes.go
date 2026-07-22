@@ -145,6 +145,7 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		finalStatus := "completed"
 		var finalError string
 		var sessionID string
+		var resumeRejected bool
 
 		// 1. Initialize handshake.
 		_, err := c.request(runCtx, "initialize", map[string]any{
@@ -176,7 +177,8 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			if err != nil {
 				finalStatus = "failed"
 				finalError = fmt.Sprintf("hermes session/resume failed: %v", err)
-				resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
+				resumeRejected = isACPSessionNotFound(err)
+				resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds(), ResumeRejected: resumeRejected}
 				return
 			}
 			sessionID = opts.ResumeSessionID
@@ -217,7 +219,8 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				b.cfg.Logger.Warn("hermes set_session_model failed", "error", err, "requested_model", opts.Model)
 				finalStatus = "failed"
 				finalError = fmt.Sprintf("hermes could not switch to model %q: %v", opts.Model, err)
-				if opts.ResumeSessionID != "" && isACPSessionNotFound(err) {
+				resumeRejected = opts.ResumeSessionID != "" && isACPSessionNotFound(err)
+				if resumeRejected {
 					b.cfg.Logger.Warn("resumed session not found at set_model time; clearing session id so the daemon retries fresh",
 						"backend", "hermes",
 						"session_id", sessionID,
@@ -225,10 +228,11 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 					sessionID = ""
 				}
 				resCh <- Result{
-					Status:     finalStatus,
-					Error:      finalError,
-					DurationMs: time.Since(startTime).Milliseconds(),
-					SessionID:  sessionID,
+					Status:         finalStatus,
+					Error:          finalError,
+					DurationMs:     time.Since(startTime).Milliseconds(),
+					SessionID:      sessionID,
+					ResumeRejected: resumeRejected,
 				}
 				return
 			}
@@ -260,7 +264,8 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			} else {
 				finalStatus = "failed"
 				finalError = fmt.Sprintf("hermes session/prompt failed: %v", err)
-				if opts.ResumeSessionID != "" && isACPSessionNotFound(err) {
+				resumeRejected = opts.ResumeSessionID != "" && isACPSessionNotFound(err)
+				if resumeRejected {
 					b.cfg.Logger.Warn("resumed session not found at prompt time; clearing session id so the daemon retries fresh",
 						"backend", "hermes",
 						"session_id", sessionID,
@@ -329,12 +334,13 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		}
 
 		resCh <- Result{
-			Status:     finalStatus,
-			Output:     finalOutput,
-			Error:      finalError,
-			DurationMs: duration.Milliseconds(),
-			SessionID:  sessionID,
-			Usage:      usageMap,
+			Status:         finalStatus,
+			Output:         finalOutput,
+			Error:          finalError,
+			DurationMs:     duration.Milliseconds(),
+			SessionID:      sessionID,
+			Usage:          usageMap,
+			ResumeRejected: resumeRejected,
 		}
 	}()
 
@@ -495,17 +501,29 @@ func (c *hermesClient) handleAgentRequest(raw map[string]json.RawMessage) {
 	var resp map[string]any
 	switch method {
 	case "session/request_permission":
-		resp = map[string]any{
-			"jsonrpc": "2.0",
-			"id":      json.RawMessage(rawID),
-			"result": map[string]any{
-				"outcome": map[string]any{
-					"outcome":  "selected",
-					"optionId": "approve_for_session",
+		optionID, grant, selectable := selectACPPermissionOption(raw["params"])
+		if selectable {
+			resp = map[string]any{
+				"jsonrpc": "2.0",
+				"id":      json.RawMessage(rawID),
+				"result": map[string]any{
+					"outcome": map[string]any{
+						"outcome":  "selected",
+						"optionId": optionID,
+					},
 				},
-			},
+			}
+			c.cfg.Logger.Debug("answered agent permission request", "method", method, "optionId", optionID, "grant", grant)
+		} else {
+			resp = map[string]any{
+				"jsonrpc": "2.0",
+				"id":      json.RawMessage(rawID),
+				"error": map[string]any{
+					"code":    -32603,
+					"message": "no auto-selectable permission option offered",
+				},
+			}
 		}
-		c.cfg.Logger.Debug("auto-approved agent permission request", "method", method)
 	default:
 		// Unknown agent→client method — reply with standard "method
 		// not found" so the agent doesn't block waiting for us. Better
@@ -529,6 +547,47 @@ func (c *hermesClient) handleAgentRequest(raw map[string]json.RawMessage) {
 	data = append(data, '\n')
 	if err := c.writeLine(data); err != nil {
 		c.cfg.Logger.Warn("write agent-request response", "method", method, "error", err)
+	}
+}
+
+type acpPermissionOption struct {
+	OptionID string `json:"optionId"`
+	Kind     string `json:"kind"`
+}
+
+func selectACPPermissionOption(params json.RawMessage) (string, bool, bool) {
+	var payload struct {
+		Options []acpPermissionOption `json:"options"`
+	}
+	if len(params) == 0 || json.Unmarshal(params, &payload) != nil {
+		return "", false, false
+	}
+	for _, wanted := range []string{"allow_session", "approve_for_session"} {
+		for _, option := range payload.Options {
+			if option.OptionID == wanted && isACPGrantKind(option.Kind) {
+				return option.OptionID, true, true
+			}
+		}
+	}
+	for _, option := range payload.Options {
+		if option.OptionID != "" && strings.EqualFold(strings.TrimSpace(option.Kind), "allow_once") {
+			return option.OptionID, true, true
+		}
+	}
+	for _, option := range payload.Options {
+		if option.OptionID != "" && strings.EqualFold(strings.TrimSpace(option.Kind), "reject_once") {
+			return option.OptionID, false, true
+		}
+	}
+	return "", false, false
+}
+
+func isACPGrantKind(kind string) bool {
+	switch strings.ToLower(strings.TrimSpace(kind)) {
+	case "allow_once", "allow_always":
+		return true
+	default:
+		return false
 	}
 }
 

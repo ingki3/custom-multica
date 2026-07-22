@@ -217,7 +217,9 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 
 		b.cfg.Logger.Info("claude finished", "pid", cmd.Process.Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
 
-		reportedSessionID := resolveSessionID(opts.ResumeSessionID, sessionID, finalStatus == "failed", stderrTail)
+		resumeRejected := finalStatus == "failed" && opts.ResumeSessionID != "" &&
+			(claudeNoConversationFound(finalError, stderrTail) || (sessionID != "" && sessionID != opts.ResumeSessionID))
+		reportedSessionID := resolveSessionID(opts.ResumeSessionID, sessionID, finalStatus == "failed", finalError, stderrTail)
 		if reportedSessionID != sessionID {
 			b.cfg.Logger.Info("claude resume did not land; clearing fresh session id for daemon fallback",
 				"requested_resume", opts.ResumeSessionID,
@@ -226,12 +228,13 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		}
 
 		resCh <- Result{
-			Status:     finalStatus,
-			Output:     output.String(),
-			Error:      finalError,
-			DurationMs: duration.Milliseconds(),
-			SessionID:  reportedSessionID,
-			Usage:      usage,
+			Status:         finalStatus,
+			Output:         output.String(),
+			Error:          finalError,
+			DurationMs:     duration.Milliseconds(),
+			SessionID:      reportedSessionID,
+			Usage:          usage,
+			ResumeRejected: resumeRejected,
 		}
 	}()
 
@@ -547,7 +550,7 @@ func mergeEnv(base []string, extra map[string]string) []string {
 	env := make([]string, 0, len(base)+len(extra))
 	for _, entry := range base {
 		key, _, _ := strings.Cut(entry, "=")
-		if isFilteredChildEnvKey(key) {
+		if isFilteredChildEnvKey(key) || strings.HasPrefix(strings.ToUpper(key), "MULTICA_") {
 			continue
 		}
 		env = append(env, entry)

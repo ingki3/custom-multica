@@ -85,6 +85,24 @@ type Result struct {
 	DurationMs int64
 	SessionID  string
 	Usage      map[string]TokenUsage // keyed by model name
+	// ResumeRejected is positive evidence that the requested resume itself was
+	// refused. Network, quota, auth, and provider failures must leave it false.
+	ResumeRejected bool
+}
+
+var resumeRejectionUndetectable = map[string]bool{
+	"agy":      true,
+	"copilot":  true,
+	"cursor":   true,
+	"gemini":   true,
+	"kimi":     true,
+	"kiro":     true,
+	"opencode": true,
+	"pi":       true,
+}
+
+func ResumeRejectionUndetectable(agentType string) bool {
+	return resumeRejectionUndetectable[agentType]
 }
 
 // Config configures a Backend instance.

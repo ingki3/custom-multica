@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -89,6 +90,21 @@ func truncateForSummary(s string, maxRunes int) string {
 		return string(rs)
 	}
 	return string(rs[:maxRunes]) + "…"
+}
+
+const maxSynthesizedFallbackCommentRunes = 8000
+
+const oversizedFallbackCommentNotice = "This task completed, but its output was too large to post safely. The raw output was not posted. Review the task in this issue's Execution log."
+
+func truncateFallbackCommentBody(body string, maxRunes int) string {
+	if utf8.RuneCountInString(body) <= maxRunes {
+		return body
+	}
+	return oversizedFallbackCommentNotice
+}
+
+func sanitizePersistedCommentContent(content string) string {
+	return strings.ToValidUTF8(strings.ReplaceAll(content, "\x00", ""), "\uFFFD")
 }
 
 // buildCommentTriggerSummary fetches the comment content and truncates
@@ -687,8 +703,12 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 					// emit literal `\n` 4-char sequences (Python/JSON-style) get them
 					// decoded into real newlines before the comment hits the DB. See
 					// util.UnescapeBackslashEscapes for the exact contract.
-					body := util.UnescapeBackslashEscapes(payload.Output)
-					s.createAgentComment(ctx, task.IssueID, task.AgentID, redact.Text(body), "comment", task.TriggerCommentID)
+					content := truncateFallbackCommentBody(payload.Output, maxSynthesizedFallbackCommentRunes)
+					if content == payload.Output {
+						body := util.UnescapeBackslashEscapes(payload.Output)
+						content = truncateFallbackCommentBody(redact.Text(body), maxSynthesizedFallbackCommentRunes)
+					}
+					s.createAgentComment(ctx, task.IssueID, task.AgentID, content, "comment", task.TriggerCommentID)
 				}
 			}
 		}
@@ -716,7 +736,7 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 			if _, err := s.Queries.CreateChatMessage(ctx, db.CreateChatMessageParams{
 				ChatSessionID: task.ChatSessionID,
 				Role:          "assistant",
-				Content:       redact.Text(body),
+				Content:       sanitizePersistedCommentContent(redact.Text(body)),
 				TaskID:        task.ID,
 				ElapsedMs:     computeChatElapsedMs(task),
 			}); err != nil {
@@ -893,6 +913,7 @@ var retryableReasons = map[string]bool{
 	"runtime_offline":  true,
 	"runtime_recovery": true,
 	"timeout":          true,
+	"provider_network": true,
 }
 
 // MaybeRetryFailedTask spawns a fresh queued attempt for a recently-failed
@@ -1052,11 +1073,21 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 		} else if existingErr != pgx.ErrNoRows {
 			decisionErr = existingErr
 		} else {
-			kind = RetryKindFallbackAgent
-			child, decisionErr = s.MaybeFallbackFailedTask(ctx, t)
-			if child == nil && decisionErr == nil {
+			preferSameAgentRetry := t.FailureReason.Valid && t.FailureReason.String == "provider_network"
+			if preferSameAgentRetry {
 				kind = RetryKindSameAgent
 				child, decisionErr = s.MaybeRetryFailedTask(ctx, t)
+				if child == nil && decisionErr == nil {
+					kind = RetryKindFallbackAgent
+					child, decisionErr = s.MaybeFallbackFailedTask(ctx, t)
+				}
+			} else {
+				kind = RetryKindFallbackAgent
+				child, decisionErr = s.MaybeFallbackFailedTask(ctx, t)
+				if child == nil && decisionErr == nil {
+					kind = RetryKindSameAgent
+					child, decisionErr = s.MaybeRetryFailedTask(ctx, t)
+				}
 			}
 		}
 		if child == nil {
@@ -1465,6 +1496,7 @@ func (s *TaskService) getIssuePrefix(workspaceID pgtype.UUID) string {
 }
 
 func (s *TaskService) createAgentComment(ctx context.Context, issueID, agentID pgtype.UUID, content, commentType string, parentID pgtype.UUID) {
+	content = sanitizePersistedCommentContent(content)
 	if content == "" {
 		return
 	}
@@ -1482,6 +1514,7 @@ func (s *TaskService) createAgentComment(ctx context.Context, issueID, agentID p
 	}
 	// Expand bare issue identifiers (e.g. MUL-117) into mention links.
 	content = mention.ExpandIssueIdentifiers(ctx, s.Queries, issue.WorkspaceID, content)
+	content = sanitizePersistedCommentContent(content)
 	comment, err := s.Queries.CreateComment(ctx, db.CreateCommentParams{
 		IssueID:     issueID,
 		WorkspaceID: issue.WorkspaceID,

@@ -30,6 +30,36 @@ var ErrRepoNotConfigured = errors.New("repo is not configured for this workspace
 // handleTask catches this and requeues the task for later retry.
 var ErrWorkingFolderBusy = errors.New("working folder is busy")
 
+func taskScopedAuthToken(task Task) (string, error) {
+	token := strings.TrimSpace(task.AuthToken)
+	if token == "" {
+		return "", errors.New("server did not provide task-scoped auth token")
+	}
+	if !strings.HasPrefix(token, "mat_") {
+		return "", errors.New("server provided non-task-scoped auth token")
+	}
+	return token, nil
+}
+
+type terminalTaskReportKind uint8
+
+const (
+	terminalTaskReportComplete terminalTaskReportKind = iota + 1
+	terminalTaskReportFail
+	terminalTaskReportTimeout = 45 * time.Second
+)
+
+type terminalTaskReport struct {
+	kind          terminalTaskReportKind
+	taskID        string
+	output        string
+	branchName    string
+	errorMessage  string
+	sessionID     string
+	workDir       string
+	failureReason string
+}
+
 // workspaceState tracks registered runtimes for a single workspace.
 type workspaceState struct {
 	workspaceID     string
@@ -1098,7 +1128,12 @@ func (d *Daemon) handleTask(ctx context.Context, task Task) {
 		// runTask returned without a TaskResult, so we don't have a SessionID
 		// to forward — best we can do is record the failure.
 		failureReason := classifyAgentFailure(provider, err.Error())
-		if failErr := d.client.FailTask(ctx, task.ID, err.Error(), "", "", failureReason); failErr != nil {
+		if failErr := d.reportTerminalTask(ctx, terminalTaskReport{
+			kind:          terminalTaskReportFail,
+			taskID:        task.ID,
+			errorMessage:  err.Error(),
+			failureReason: failureReason,
+		}); failErr != nil {
 			taskLog.Error("fail task callback failed", "error", failErr)
 		}
 		return
@@ -1131,14 +1166,35 @@ func (d *Daemon) handleTask(ctx context.Context, task Task) {
 		if failureReason == "" {
 			failureReason = "agent_error"
 		}
-		if err := d.client.FailTask(ctx, task.ID, result.Comment, result.SessionID, result.WorkDir, failureReason); err != nil {
+		if err := d.reportTerminalTask(ctx, terminalTaskReport{
+			kind:          terminalTaskReportFail,
+			taskID:        task.ID,
+			errorMessage:  result.Comment,
+			sessionID:     result.SessionID,
+			workDir:       result.WorkDir,
+			failureReason: failureReason,
+		}); err != nil {
 			taskLog.Error("report blocked task failed", "error", err)
 		}
 	default:
 		taskLog.Info("task completed", "status", result.Status)
-		if err := d.client.CompleteTask(ctx, task.ID, result.Comment, result.BranchName, result.SessionID, result.WorkDir); err != nil {
+		if err := d.reportTerminalTask(ctx, terminalTaskReport{
+			kind:       terminalTaskReportComplete,
+			taskID:     task.ID,
+			output:     result.Comment,
+			branchName: result.BranchName,
+			sessionID:  result.SessionID,
+			workDir:    result.WorkDir,
+		}); err != nil {
 			taskLog.Error("complete task failed, falling back to fail", "error", err)
-			if failErr := d.client.FailTask(ctx, task.ID, fmt.Sprintf("complete task failed: %s", err.Error()), result.SessionID, result.WorkDir, "agent_error"); failErr != nil {
+			if failErr := d.reportTerminalTask(ctx, terminalTaskReport{
+				kind:          terminalTaskReportFail,
+				taskID:        task.ID,
+				errorMessage:  fmt.Sprintf("complete task failed: %s", err.Error()),
+				sessionID:     result.SessionID,
+				workDir:       result.WorkDir,
+				failureReason: "agent_error",
+			}); failErr != nil {
 				taskLog.Error("fail task fallback also failed", "error", failErr)
 			}
 		}
@@ -1160,6 +1216,23 @@ func (d *Daemon) handleTask(ctx context.Context, task Task) {
 	}
 }
 
+// reportTerminalTask preserves context values but detaches terminal callbacks
+// from daemon shutdown cancellation. The explicit timeout keeps the detached
+// request bounded while allowing the client retry budget to complete.
+func (d *Daemon) reportTerminalTask(parentCtx context.Context, report terminalTaskReport) error {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(parentCtx), terminalTaskReportTimeout)
+	defer cancel()
+
+	switch report.kind {
+	case terminalTaskReportComplete:
+		return d.client.CompleteTask(ctx, report.taskID, report.output, report.branchName, report.sessionID, report.workDir)
+	case terminalTaskReportFail:
+		return d.client.FailTask(ctx, report.taskID, report.errorMessage, report.sessionID, report.workDir, report.failureReason)
+	default:
+		return fmt.Errorf("unsupported terminal task report kind %d", report.kind)
+	}
+}
+
 // gateResumeToReusedWorkdir clears the task's prior session unless the task
 // runs in the exact workdir the session was recorded against, and reports
 // whether that workdir was reused. CLI backends key their session stores to
@@ -1175,6 +1248,31 @@ func gateResumeToReusedWorkdir(task *Task, envWorkDir string, taskLog *slog.Logg
 		task.PriorSessionID = ""
 	}
 	return reused
+}
+
+func shouldRetryWithFreshSession(result agent.Result, priorSessionID string, tools int32, provider string) bool {
+	if result.Status != "failed" || priorSessionID == "" || tools > 0 {
+		return false
+	}
+	if !freshSessionMayHelp(provider, result.Error) {
+		return false
+	}
+	if result.ResumeRejected {
+		return true
+	}
+	if !agent.ResumeRejectionUndetectable(provider) || result.SessionID != "" {
+		return false
+	}
+	return true
+}
+
+func freshSessionMayHelp(provider, errText string) bool {
+	switch classifyAgentFailure(provider, errText) {
+	case "provider_network", "rate_limit", "quota_exceeded", "auth_expired", "model_limit", "model_access", "model_not_found", "timeout":
+		return false
+	default:
+		return true
+	}
 }
 
 func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLog *slog.Logger) (TaskResult, error) {
@@ -1323,10 +1421,17 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 
 	prompt := BuildPrompt(task)
 
-	// Pass the daemon's auth credentials and context so the spawned agent CLI
+	// Pass task-scoped auth credentials and context so the spawned agent CLI
 	// can call the Multica API and the local daemon (e.g. `multica repo checkout`).
+	// Never fall back to the daemon credential: writes would land as the runtime
+	// owner and could retrigger the same agent outside task-scoped authorization.
+	agentToken, err := taskScopedAuthToken(task)
+	if err != nil {
+		taskLog.Error("task auth token invalid; refusing to start agent", "error", err)
+		return TaskResult{}, err
+	}
 	agentEnv := map[string]string{
-		"MULTICA_TOKEN":        d.client.Token(),
+		"MULTICA_TOKEN":        agentToken,
 		"MULTICA_SERVER_URL":   d.cfg.ServerBaseURL,
 		"MULTICA_DAEMON_PORT":  fmt.Sprintf("%d", d.cfg.HealthPort),
 		"MULTICA_WORKSPACE_ID": task.WorkspaceID,
@@ -1365,7 +1470,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 	// Bedrock). These are set per-agent via the agent settings UI.
 	// Critical internal variables are blocklisted to prevent accidental or
 	// malicious override of daemon-set values.
+	var agentCustomEnv map[string]string
 	if task.Agent != nil {
+		agentCustomEnv = task.Agent.CustomEnv
 		for k, v := range task.Agent.CustomEnv {
 			if isBlockedEnvKey(k) {
 				d.logger.Warn("custom_env: blocked key skipped", "key", k)
@@ -1373,6 +1480,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 			}
 			agentEnv[k] = v
 		}
+	}
+	if err := configureCodexTaskShellEnvironment(provider, env.CodexHome, os.Environ(), agentEnv, agentCustomEnv, d.logger); err != nil {
+		return TaskResult{}, err
 	}
 	backend, err := agent.New(provider, agent.Config{
 		ExecutablePath: entry.Path,
@@ -1443,10 +1553,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 		return TaskResult{}, err
 	}
 
-	// Fallback: if session resume failed before establishing a session, retry
-	// with a fresh session. We check SessionID == "" to distinguish a resume
-	// failure (no session established) from a failure during actual execution.
-	if result.Status == "failed" && task.PriorSessionID != "" && result.SessionID == "" {
+	if shouldRetryWithFreshSession(result, task.PriorSessionID, tools, provider) {
 		firstUsage := result.Usage
 		taskLog.Warn("session resume failed, retrying with fresh session", "error", result.Error)
 		execOpts.ResumeSessionID = ""
@@ -1850,6 +1957,33 @@ func isBlockedEnvKey(key string) bool {
 		return true
 	}
 	return false
+}
+
+func codexShellAuthorizedCustomEnvNames(customEnv map[string]string) []string {
+	names := make([]string, 0, len(customEnv))
+	for key := range customEnv {
+		if key == "" || isBlockedEnvKey(key) {
+			continue
+		}
+		names = append(names, key)
+	}
+	return names
+}
+
+func configureCodexTaskShellEnvironment(provider, codexHome string, inherited []string, agentEnv, agentCustomEnv map[string]string, logger *slog.Logger) error {
+	if provider != "codex" {
+		return nil
+	}
+	if strings.TrimSpace(codexHome) == "" {
+		return errors.New("configure Codex shell environment: task CODEX_HOME is missing")
+	}
+	authorizedExplicit := codexShellAuthorizedCustomEnvNames(agentCustomEnv)
+	includeOnly := execenv.CodexShellEnvAllowlist(inherited, agentEnv, authorizedExplicit)
+	configPath := filepath.Join(codexHome, "config.toml")
+	if err := execenv.EnsureCodexShellEnvPolicyConfig(configPath, includeOnly, logger); err != nil {
+		return fmt.Errorf("configure Codex shell environment: %w", err)
+	}
+	return nil
 }
 
 func defaultArgsForProvider(cfg Config, provider string) []string {

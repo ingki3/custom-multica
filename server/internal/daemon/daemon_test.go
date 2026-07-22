@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -49,6 +50,127 @@ func TestNormalizeServerBaseURL(t *testing.T) {
 	}
 	if got != "http://localhost:8080" {
 		t.Fatalf("expected http://localhost:8080, got %s", got)
+	}
+}
+
+func TestTaskScopedAuthToken(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		token   string
+		want    string
+		wantErr string
+	}{
+		{name: "missing token fails closed", wantErr: "server did not provide task-scoped auth token"},
+		{name: "member token fails closed", token: "mul_member_token", wantErr: "server provided non-task-scoped auth token"},
+		{name: "task token accepted", token: " mat_task_token ", want: "mat_task_token"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := taskScopedAuthToken(Task{AuthToken: tt.token})
+			if tt.wantErr != "" {
+				if err == nil || err.Error() != tt.wantErr {
+					t.Fatalf("taskScopedAuthToken() error = %v, want %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("taskScopedAuthToken(): %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("taskScopedAuthToken() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestTaskScopedAuthTokenDecodesFromClaimPayload(t *testing.T) {
+	t.Parallel()
+	var envelope struct {
+		Task Task `json:"task"`
+	}
+	if err := json.Unmarshal([]byte(`{"task":{"id":"task-1","auth_token":"mat_claim_token"}}`), &envelope); err != nil {
+		t.Fatalf("decode claim payload: %v", err)
+	}
+	got, err := taskScopedAuthToken(envelope.Task)
+	if err != nil {
+		t.Fatalf("taskScopedAuthToken(): %v", err)
+	}
+	if got != "mat_claim_token" {
+		t.Fatalf("taskScopedAuthToken() = %q, want mat_claim_token", got)
+	}
+}
+
+func TestConfigureCodexTaskShellEnvironment(t *testing.T) {
+	t.Parallel()
+	t.Run("non-Codex runtime is unchanged", func(t *testing.T) {
+		t.Parallel()
+		codexHome := t.TempDir()
+		if err := configureCodexTaskShellEnvironment("claude", codexHome, nil, nil, nil, slog.Default()); err != nil {
+			t.Fatalf("configureCodexTaskShellEnvironment: %v", err)
+		}
+		if _, err := os.Stat(filepath.Join(codexHome, "config.toml")); !os.IsNotExist(err) {
+			t.Fatalf("non-Codex runtime unexpectedly wrote config.toml: %v", err)
+		}
+	})
+
+	t.Run("Codex policy uses platform and authorized task environment", func(t *testing.T) {
+		t.Parallel()
+		codexHome := t.TempDir()
+		inherited := []string{"SystemRoot=C:\\Windows", "USERPROFILE=C:\\Users\\test", "OPENAI_API_KEY=host-secret", "MULTICA_LLM_API_KEY=daemon-secret"}
+		agentEnv := map[string]string{
+			"CUSTOM_ACCESS_TOKEN": "agent-secret",
+			"CUSTOM_FLAG":         "enabled",
+			"UNAUTHORIZED_TOKEN":  "daemon-secret",
+			"MULTICA_SERVER_URL":  "https://task.example",
+			"MULTICA_TOKEN":       "mat_task",
+		}
+		agentCustomEnv := map[string]string{"CUSTOM_ACCESS_TOKEN": "agent-secret", "CUSTOM_FLAG": "enabled"}
+		if err := configureCodexTaskShellEnvironment("codex", codexHome, inherited, agentEnv, agentCustomEnv, slog.Default()); err != nil {
+			t.Fatalf("configureCodexTaskShellEnvironment: %v", err)
+		}
+		data, err := os.ReadFile(filepath.Join(codexHome, "config.toml"))
+		if err != nil {
+			t.Fatalf("read config.toml: %v", err)
+		}
+		config := string(data)
+		for _, want := range []string{"SystemRoot", "USERPROFILE", "CUSTOM_ACCESS_TOKEN", "CUSTOM_FLAG", "MULTICA_SERVER_URL", "MULTICA_TOKEN"} {
+			if !strings.Contains(config, want) {
+				t.Errorf("config.toml missing %q:\n%s", want, config)
+			}
+		}
+		for _, unwanted := range []string{"OPENAI_API_KEY", "MULTICA_LLM_API_KEY", "UNAUTHORIZED_TOKEN", "MULTICA_*", "agent-secret", "daemon-secret", "mat_task"} {
+			if strings.Contains(config, unwanted) {
+				t.Errorf("config.toml unexpectedly contains %q:\n%s", unwanted, config)
+			}
+		}
+	})
+
+	t.Run("Codex without task home fails closed", func(t *testing.T) {
+		t.Parallel()
+		err := configureCodexTaskShellEnvironment("codex", "", nil, map[string]string{"MULTICA_TOKEN": "mat_task"}, nil, slog.Default())
+		if err == nil || !strings.Contains(err.Error(), "CODEX_HOME is missing") {
+			t.Fatalf("error = %v, want missing CODEX_HOME", err)
+		}
+	})
+}
+
+func TestCodexShellAuthorizedCustomEnvNamesUsesDaemonBlocklist(t *testing.T) {
+	t.Parallel()
+	got := codexShellAuthorizedCustomEnvNames(map[string]string{
+		"CUSTOM_ACCESS_TOKEN": "agent-secret",
+		"custom_secret":       "agent-secret",
+		"MULTICA_TOKEN":       "must-not-authorize",
+		"PATH":                "/must/not/override",
+		"HOME":                "/must/not/override",
+		"CODEX_HOME":          "/must/not/override",
+		"":                    "must-not-authorize",
+	})
+	slices.Sort(got)
+	want := []string{"CUSTOM_ACCESS_TOKEN", "custom_secret"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("codexShellAuthorizedCustomEnvNames() = %#v, want %#v", got, want)
 	}
 }
 
@@ -852,5 +974,35 @@ func TestDefaultArgsForProvider(t *testing.T) {
 	}
 	if got := defaultArgsForProvider(cfg, "gemini"); got != nil {
 		t.Fatalf("expected nil for unsupported provider, got %#v", got)
+	}
+}
+
+func TestReportTerminalTaskIgnoresParentCancellation(t *testing.T) {
+	t.Parallel()
+	var paths []string
+	var mu sync.Mutex
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		paths = append(paths, r.URL.Path)
+		mu.Unlock()
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	d := &Daemon{client: NewClient(srv.URL)}
+
+	if err := d.reportTerminalTask(ctx, terminalTaskReport{kind: terminalTaskReportComplete, taskID: "task-1", output: "done"}); err != nil {
+		t.Fatalf("complete with cancelled parent: %v", err)
+	}
+	if err := d.reportTerminalTask(ctx, terminalTaskReport{kind: terminalTaskReportFail, taskID: "task-2", errorMessage: "failed", failureReason: "agent_error"}); err != nil {
+		t.Fatalf("fail with cancelled parent: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(paths) != 2 || !strings.HasSuffix(paths[0], "/complete") || !strings.HasSuffix(paths[1], "/fail") {
+		t.Fatalf("terminal callback paths = %#v", paths)
 	}
 }

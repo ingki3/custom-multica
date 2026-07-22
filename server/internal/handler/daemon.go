@@ -1070,31 +1070,52 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 	// Mint a task-scoped `mat_` token bound to (agent, task, workspace, owner).
 	// The daemon injects this as MULTICA_TOKEN into the spawned agent process
 	// instead of exposing its own owner-level credential.
-	if runtime.OwnerID.Valid {
-		tokenStr, terr := auth.GenerateAgentTaskToken()
-		if terr != nil {
-			outcome = "error_token"
-			slog.Error("task claim: failed to generate agent task token",
-				"task_id", uuidToString(task.ID), "error", terr)
-			writeError(w, http.StatusInternalServerError, "failed to mint task token")
-			return
+	if !runtime.OwnerID.Valid {
+		outcome = "error_token"
+		slog.Error("task claim: runtime owner missing for task token",
+			"task_id", uuidToString(task.ID),
+			"runtime_id", uuidToString(runtime.ID),
+			"workspace_id", resp.WorkspaceID,
+		)
+		if _, cerr := h.TaskService.CancelTask(r.Context(), task.ID); cerr != nil {
+			slog.Error("task claim: cancel after missing runtime owner failed",
+				"task_id", uuidToString(task.ID), "error", cerr)
 		}
-		if _, terr := h.Queries.CreateTaskToken(r.Context(), db.CreateTaskTokenParams{
-			TokenHash:   auth.HashToken(tokenStr),
-			TaskID:      task.ID,
-			AgentID:     task.AgentID,
-			WorkspaceID: parseUUID(resp.WorkspaceID),
-			UserID:      runtime.OwnerID,
-			ExpiresAt:   pgtype.Timestamptz{Time: time.Now().Add(24 * time.Hour), Valid: true},
-		}); terr != nil {
-			outcome = "error_token"
-			slog.Error("task claim: failed to persist agent task token",
-				"task_id", uuidToString(task.ID), "error", terr)
-			writeError(w, http.StatusInternalServerError, "failed to persist task token")
-			return
-		}
-		resp.AuthToken = tokenStr
+		writeError(w, http.StatusInternalServerError, "runtime owner required to mint task token")
+		return
 	}
+
+	tokenStr, terr := auth.GenerateAgentTaskToken()
+	if terr != nil {
+		outcome = "error_token"
+		slog.Error("task claim: failed to generate agent task token",
+			"task_id", uuidToString(task.ID), "error", terr)
+		if _, cerr := h.TaskService.CancelTask(r.Context(), task.ID); cerr != nil {
+			slog.Error("task claim: cancel after token generation failure failed",
+				"task_id", uuidToString(task.ID), "error", cerr)
+		}
+		writeError(w, http.StatusInternalServerError, "failed to mint task token")
+		return
+	}
+	if _, terr := h.Queries.CreateTaskToken(r.Context(), db.CreateTaskTokenParams{
+		TokenHash:   auth.HashToken(tokenStr),
+		TaskID:      task.ID,
+		AgentID:     task.AgentID,
+		WorkspaceID: parseUUID(resp.WorkspaceID),
+		UserID:      runtime.OwnerID,
+		ExpiresAt:   pgtype.Timestamptz{Time: time.Now().Add(24 * time.Hour), Valid: true},
+	}); terr != nil {
+		outcome = "error_token"
+		slog.Error("task claim: failed to persist agent task token",
+			"task_id", uuidToString(task.ID), "error", terr)
+		if _, cerr := h.TaskService.CancelTask(r.Context(), task.ID); cerr != nil {
+			slog.Error("task claim: cancel after token persistence failure failed",
+				"task_id", uuidToString(task.ID), "error", cerr)
+		}
+		writeError(w, http.StatusInternalServerError, "failed to persist task token")
+		return
+	}
+	resp.AuthToken = tokenStr
 
 	slog.Info("task claimed by runtime", "task_id", uuidToString(task.ID), "runtime_id", runtimeID, "agent_id", uuidToString(task.AgentID), "prior_session", resp.PriorSessionID)
 	writeJSON(w, http.StatusOK, map[string]any{"task": resp})

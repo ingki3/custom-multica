@@ -10,14 +10,21 @@ const patterns: { re: RegExp; replacement: string }[] = [
   { re: /(?:aws_secret_access_key|secret_?access_?key)\s*[=:]\s*[A-Za-z0-9/+=]{40}/gi, replacement: "[REDACTED AWS SECRET]" },
   // PEM private keys
   { re: /-----BEGIN[A-Z\s]*PRIVATE KEY-----[\s\S]*?-----END[A-Z\s]*PRIVATE KEY-----/g, replacement: "[REDACTED PRIVATE KEY]" },
-  // GitHub tokens
+  // GitHub OAuth / classic tokens
   { re: /\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9_]{36,255}\b/g, replacement: "[REDACTED GITHUB TOKEN]" },
+  // GitHub fine-grained PATs
+  { re: /\bgithub_pat_[A-Za-z0-9_]{20,255}\b/g, replacement: "[REDACTED GITHUB TOKEN]" },
+  // Google API keys
+  { re: /\bAIza[0-9A-Za-z_-]{35}([^0-9A-Za-z_-]|$)/g, replacement: "[REDACTED GOOGLE API KEY]$1" },
   // GitLab personal access tokens
   { re: /\bglpat-[A-Za-z0-9_-]{20,}\b/g, replacement: "[REDACTED GITLAB TOKEN]" },
   // OpenAI / Anthropic API keys
   { re: /\bsk-[A-Za-z0-9_-]{20,}\b/g, replacement: "[REDACTED API KEY]" },
-  // Slack tokens
-  { re: /\bxox[bporas]-[A-Za-z0-9-]{10,}\b/g, replacement: "[REDACTED SLACK TOKEN]" },
+  // Slack bot/user/legacy/config and app-level tokens
+  { re: /\bxox[bporase]-[A-Za-z0-9-]{10,}\b/g, replacement: "[REDACTED SLACK TOKEN]" },
+  { re: /\bxapp-[A-Za-z0-9-]{10,}\b/g, replacement: "[REDACTED SLACK TOKEN]" },
+  // Stripe live secret/restricted keys (publishable pk_live_ keys are public)
+  { re: /\b(?:sk|rk)_live_[0-9A-Za-z]{16,}\b/g, replacement: "[REDACTED STRIPE KEY]" },
   // JWT tokens
   { re: /\bey[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, replacement: "[REDACTED JWT]" },
   // Bearer tokens

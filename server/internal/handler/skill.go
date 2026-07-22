@@ -8,7 +8,9 @@ import (
 	"net/http"
 	"net/url"
 	"path/filepath"
+	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -447,6 +449,32 @@ type githubTreeResponse struct {
 type githubTreeEntry struct {
 	Path string `json:"path"`
 	Type string `json:"type"` // "blob" or "tree"
+	Size int64  `json:"size"`
+}
+
+const (
+	maxImportFileSize  = 1 << 20
+	maxImportTotalSize = 8 << 20
+	maxImportFileCount = 256
+	treeDownloadLimit  = 8
+)
+
+func fetchGitHubTree(httpClient *http.Client, owner, repo, ref string) (githubTreeResponse, error) {
+	apiURL := fmt.Sprintf("https://api.github.com/repos/%s/%s/git/trees/%s?recursive=1",
+		url.PathEscape(owner), url.PathEscape(repo), url.PathEscape(ref))
+	resp, err := httpClient.Get(apiURL)
+	if err != nil {
+		return githubTreeResponse{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return githubTreeResponse{}, fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+	var tree githubTreeResponse
+	if err := json.NewDecoder(resp.Body).Decode(&tree); err != nil {
+		return githubTreeResponse{}, err
+	}
+	return tree, nil
 }
 
 // fetchGitHubDefaultBranch returns the default branch of a GitHub repository.
@@ -649,6 +677,11 @@ func fetchFromSkillsSh(httpClient *http.Client, rawURL string) (*importedSkill, 
 	defaultBranch := fetchGitHubDefaultBranch(httpClient, owner, repo)
 	rawPrefix := fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/%s",
 		url.PathEscape(owner), url.PathEscape(repo), url.PathEscape(defaultBranch))
+	tree, treeErr := fetchGitHubTree(httpClient, owner, repo, defaultBranch)
+	treeAvailable := treeErr == nil && !tree.Truncated
+	if treeErr != nil {
+		slog.Warn("skills.sh import: repository tree unavailable; using bounded legacy crawl", "owner", owner, "repo", repo, "error", treeErr)
+	}
 
 	candidatePaths := []string{
 		"skills/" + skillName,
@@ -682,9 +715,21 @@ func fetchFromSkillsSh(httpClient *http.Client, rawURL string) (*importedSkill, 
 		}
 	}
 	if skillMdBody == nil {
-		skillDir, skillMdBody, err = resolveGitHubSkillDirByName(httpClient, owner, repo, defaultBranch, rawPrefix, skillName)
-		if err != nil {
-			return nil, err
+		if treeAvailable {
+			skillPaths := extractSkillMdPaths(tree.Tree)
+			preferred, remaining := partitionSkillMdPaths(skillName, skillPaths)
+			if dir, body, ok := findMatchingSkillDirByFrontmatter(httpClient, rawPrefix, skillName, preferred); ok {
+				skillDir, skillMdBody = dir, body
+			} else if dir, body, ok := findMatchingSkillDirByFrontmatter(httpClient, rawPrefix, skillName, remaining); ok {
+				skillDir, skillMdBody = dir, body
+			} else {
+				return nil, skillMdNotFoundError(owner, repo, skillName)
+			}
+		} else {
+			skillDir, skillMdBody, err = resolveGitHubSkillDirByName(httpClient, owner, repo, defaultBranch, rawPrefix, skillName)
+			if err != nil {
+				return nil, err
+			}
 		}
 	}
 
@@ -700,50 +745,136 @@ func fetchFromSkillsSh(httpClient *http.Client, rawURL string) (*importedSkill, 
 		content:     string(skillMdBody),
 	}
 
-	// 2. List supporting files via GitHub API
-	apiURL := buildGitHubContentsURL(owner, repo, skillDir, defaultBranch)
-	dirResp, err := httpClient.Get(apiURL)
-	if err != nil || dirResp.StatusCode != http.StatusOK {
-		// Can't list files — return what we have (SKILL.md only)
-		if dirResp != nil {
-			dirResp.Body.Close()
+	if treeAvailable {
+		if err := addSupportingFilesFromTree(httpClient, result, tree.Tree, rawPrefix, skillDir); err != nil {
+			return nil, err
 		}
-		return result, nil
 	}
-	defer dirResp.Body.Close()
+	if !treeAvailable || len(result.files) == 0 {
+		if err := addSupportingFilesViaCrawl(httpClient, result, owner, repo, defaultBranch, skillDir); err != nil {
+			return nil, err
+		}
+	}
 
+	return result, nil
+}
+
+func addSupportingFilesViaCrawl(httpClient *http.Client, result *importedSkill, owner, repo, ref, skillDir string) error {
+	apiURL := buildGitHubContentsURL(owner, repo, skillDir, ref)
+	resp, err := httpClient.Get(apiURL)
+	if err != nil {
+		return fmt.Errorf("list skill directory: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		resp.Body.Close()
+		return fmt.Errorf("list skill directory: HTTP %d", resp.StatusCode)
+	}
+	defer resp.Body.Close()
 	var entries []githubContentEntry
-	if err := json.NewDecoder(dirResp.Body).Decode(&entries); err != nil {
-		slog.Warn("skills.sh import: failed to decode top-level directory listing", "url", apiURL, "error", err)
-		return result, nil
+	if err := json.NewDecoder(resp.Body).Decode(&entries); err != nil {
+		return fmt.Errorf("decode skill directory: %w", err)
 	}
-
-	// 3. Recursively collect files (excluding SKILL.md and LICENSE)
 	var allFiles []githubContentEntry
-	slog.Info("skills.sh import: collecting supporting files", "skill", skillName, "top_level_entries", len(entries))
-	collectGitHubFiles(httpClient, entries, &allFiles, apiURL)
-	slog.Info("skills.sh import: collected supporting files", "skill", skillName, "files", len(allFiles))
-
-	// 4. Download each file
+	if err := collectGitHubFiles(httpClient, entries, &allFiles, apiURL, &githubCrawlBudget{}, 0); err != nil {
+		return err
+	}
 	basePath := ""
 	if skillDir != "" {
-		basePath = skillDir + "/"
+		basePath = strings.Trim(skillDir, "/") + "/"
 	}
+	total := 0
 	for _, entry := range allFiles {
 		if entry.DownloadURL == "" {
 			continue
 		}
 		body, err := fetchRawFile(httpClient, entry.DownloadURL)
 		if err != nil {
-			slog.Warn("skills.sh import: file download failed", "path", entry.Path, "error", err)
+			return fmt.Errorf("download supporting file %s: %w", entry.Path, err)
+		}
+		total += len(body)
+		if total > maxImportTotalSize {
+			return fmt.Errorf("skill supporting files exceed the %d byte limit", maxImportTotalSize)
+		}
+		result.files = append(result.files, importedFile{path: strings.TrimPrefix(entry.Path, basePath), content: string(body)})
+	}
+	return nil
+}
+
+func addSupportingFilesFromTree(httpClient *http.Client, result *importedSkill, tree []githubTreeEntry, rawPrefix, skillDir string) error {
+	type treeFile struct {
+		repoPath string
+		relPath  string
+		size     int64
+	}
+	basePath := ""
+	if skillDir != "" {
+		basePath = strings.Trim(skillDir, "/") + "/"
+	}
+	files := make([]treeFile, 0)
+	var totalSize int64
+	for _, entry := range tree {
+		if entry.Type != "blob" || (basePath != "" && !strings.HasPrefix(entry.Path, basePath)) {
 			continue
 		}
-		// Convert absolute GitHub path to relative path within skill
 		relPath := strings.TrimPrefix(entry.Path, basePath)
-		result.files = append(result.files, importedFile{path: relPath, content: string(body)})
+		if relPath == "" || strings.Contains(relPath, "../") {
+			continue
+		}
+		base := strings.ToLower(filepath.Base(relPath))
+		if base == "skill.md" || base == "license" || base == "license.txt" || base == "license.md" {
+			continue
+		}
+		if entry.Size > maxImportFileSize {
+			return fmt.Errorf("supporting file %s exceeds the %d byte limit", relPath, maxImportFileSize)
+		}
+		files = append(files, treeFile{repoPath: entry.Path, relPath: relPath, size: entry.Size})
+		totalSize += entry.Size
 	}
+	if len(files) > maxImportFileCount {
+		return fmt.Errorf("skill contains %d supporting files; limit is %d", len(files), maxImportFileCount)
+	}
+	if totalSize > maxImportTotalSize {
+		return fmt.Errorf("skill supporting files total %d bytes; limit is %d", totalSize, maxImportTotalSize)
+	}
+	sort.Slice(files, func(i, j int) bool { return files[i].relPath < files[j].relPath })
 
-	return result, nil
+	results := make([]importedFile, len(files))
+	errCh := make(chan error, len(files))
+	sem := make(chan struct{}, treeDownloadLimit)
+	var wg sync.WaitGroup
+	for i, file := range files {
+		i, file := i, file
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			body, err := fetchRawFile(httpClient, buildRawGitHubURL(rawPrefix, file.repoPath))
+			if err != nil {
+				errCh <- fmt.Errorf("download supporting file %s: %w", file.repoPath, err)
+				return
+			}
+			if len(body) > maxImportFileSize {
+				errCh <- fmt.Errorf("supporting file %s exceeds the %d byte limit", file.repoPath, maxImportFileSize)
+				return
+			}
+			results[i] = importedFile{path: file.relPath, content: string(body)}
+		}()
+	}
+	wg.Wait()
+	close(errCh)
+	if err := <-errCh; err != nil {
+		return err
+	}
+	actualTotal := 0
+	for _, file := range results {
+		actualTotal += len(file.content)
+	}
+	if actualTotal > maxImportTotalSize {
+		return fmt.Errorf("skill supporting files total %d bytes; limit is %d", actualTotal, maxImportTotalSize)
+	}
+	result.files = append(result.files, results...)
+	return nil
 }
 
 func resolveGitHubSkillDirByName(httpClient *http.Client, owner, repo, defaultBranch, rawPrefix, skillName string) (string, []byte, error) {
@@ -782,23 +913,43 @@ func resolveGitHubSkillDirByName(httpClient *http.Client, owner, repo, defaultBr
 	return "", nil, fmt.Errorf("repository %s/%s tree is too large to scan exhaustively for skill %s", owner, repo, skillName)
 }
 
-// collectGitHubFiles recursively collects file entries from a GitHub directory listing.
-func collectGitHubFiles(httpClient *http.Client, entries []githubContentEntry, out *[]githubContentEntry, parentURL string) {
+const (
+	maxGitHubCrawlRequests = 256
+	maxGitHubCrawlDepth    = 16
+)
+
+type githubCrawlBudget struct {
+	requests int
+}
+
+// collectGitHubFiles recursively collects file entries while enforcing the
+// fallback crawl's file, request, and depth budgets during discovery.
+func collectGitHubFiles(httpClient *http.Client, entries []githubContentEntry, out *[]githubContentEntry, parentURL string, budget *githubCrawlBudget, depth int) error {
+	if depth > maxGitHubCrawlDepth {
+		return fmt.Errorf("skill directory nesting exceeds the %d level limit", maxGitHubCrawlDepth)
+	}
 	for _, entry := range entries {
 		lower := strings.ToLower(entry.Name)
 		if lower == "skill.md" || lower == "license" || lower == "license.txt" || lower == "license.md" {
 			continue
 		}
 		if entry.Type == "file" {
+			if len(*out) >= maxImportFileCount {
+				return fmt.Errorf("skill contains more than %d supporting files", maxImportFileCount)
+			}
 			*out = append(*out, entry)
 		} else if entry.Type == "dir" {
+			if budget.requests >= maxGitHubCrawlRequests {
+				return fmt.Errorf("skill directory crawl exceeds the %d request limit", maxGitHubCrawlRequests)
+			}
+			budget.requests++
 			// Fetch subdirectory contents
 			subURL := entry.URL
 			if subURL == "" {
 				parsed, err := url.Parse(parentURL)
 				if err != nil {
 					slog.Warn("skills.sh import: invalid parent directory url", "url", parentURL, "error", err)
-					continue
+					return fmt.Errorf("invalid parent directory URL %s: %w", parentURL, err)
 				}
 				parsed.Path = strings.TrimSuffix(parsed.Path, "/") + "/" + entry.Name
 				subURL = parsed.String()
@@ -814,18 +965,21 @@ func collectGitHubFiles(httpClient *http.Client, entries []githubContentEntry, o
 					attrs = append(attrs, "error", err)
 				}
 				slog.Warn("skills.sh import: failed to list subdirectory", attrs...)
-				continue
+				return fmt.Errorf("list supporting directory %s failed", subURL)
 			}
 			var subEntries []githubContentEntry
 			if err := json.NewDecoder(subResp.Body).Decode(&subEntries); err != nil {
 				subResp.Body.Close()
 				slog.Warn("skills.sh import: failed to decode subdirectory listing", "url", subURL, "error", err)
-				continue
+				return fmt.Errorf("decode supporting directory %s: %w", subURL, err)
 			}
 			subResp.Body.Close()
-			collectGitHubFiles(httpClient, subEntries, out, subURL)
+			if err := collectGitHubFiles(httpClient, subEntries, out, subURL, budget, depth+1); err != nil {
+				return err
+			}
 		}
 	}
+	return nil
 }
 
 func findSkillDirFromConventionalPrefixes(httpClient *http.Client, owner, repo, defaultBranch, rawPrefix, skillName string) (string, []byte, bool) {
@@ -1021,7 +1175,7 @@ func parseSkillFrontmatter(content string) (name, description string) {
 
 // --- Shared helpers ---
 
-// fetchRawFile downloads a URL and returns the body bytes. Limit 1MB.
+// fetchRawFile downloads a URL and rejects bodies larger than the per-file cap.
 func fetchRawFile(httpClient *http.Client, fileURL string) ([]byte, error) {
 	resp, err := httpClient.Get(fileURL)
 	if err != nil {
@@ -1031,7 +1185,14 @@ func fetchRawFile(httpClient *http.Client, fileURL string) ([]byte, error) {
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
-	return io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxImportFileSize+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(body) > maxImportFileSize {
+		return nil, fmt.Errorf("file exceeds the %d byte import limit", maxImportFileSize)
+	}
+	return body, nil
 }
 
 func buildRawGitHubURL(rawPrefix, repoPath string) string {

@@ -54,6 +54,11 @@ MULTICA_WORKSPACE_ID=<workspace-uuid>
 MULTICA_RUNTIME_MODELS_CONFIG=~/.multica/runtime-models.json
 ```
 
+`MULTICA_TOKEN` overrides the saved profile token for ordinary interactive and
+CI commands. During daemon-managed agent execution, the CLI accepts only the
+task-scoped `mat_` token injected by the daemon and never falls back to the
+user's saved `mul_` PAT. A missing or non-task token fails closed.
+
 ## 2. Authentication and setup
 
 Check config and auth:

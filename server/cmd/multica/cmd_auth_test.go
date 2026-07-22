@@ -37,6 +37,40 @@ func TestResolveAppURL(t *testing.T) {
 	})
 }
 
+func TestResolveTokenAgentContextIsFailClosed(t *testing.T) {
+	cmd := testCmd()
+	t.Setenv("MULTICA_AGENT_ID", "agent-1")
+	t.Setenv("MULTICA_TASK_ID", "task-1")
+	t.Setenv("MULTICA_TOKEN", "")
+	if got := resolveToken(cmd); got != "" {
+		t.Fatalf("agent context must not fall back to profile token, got %q", got)
+	}
+	t.Setenv("MULTICA_TOKEN", "mat_test_token")
+	if got := resolveToken(cmd); got != "mat_test_token" {
+		t.Fatalf("resolveToken() = %q", got)
+	}
+}
+
+func TestNewAPIClientAgentContextRequiresTaskToken(t *testing.T) {
+	cmd := testCmd()
+	for key, value := range map[string]string{
+		"MULTICA_AGENT_ID":     "agent-1",
+		"MULTICA_TASK_ID":      "task-1",
+		"MULTICA_SERVER_URL":   "http://127.0.0.1:8080",
+		"MULTICA_WORKSPACE_ID": "workspace-1",
+	} {
+		t.Setenv(key, value)
+	}
+	t.Setenv("MULTICA_TOKEN", "mul_owner_token")
+	if _, err := newAPIClient(cmd); err == nil {
+		t.Fatal("expected owner token to be rejected in agent context")
+	}
+	t.Setenv("MULTICA_TOKEN", "mat_task_token")
+	if _, err := newAPIClient(cmd); err != nil {
+		t.Fatalf("task token rejected: %v", err)
+	}
+}
+
 func TestResolveCallbackBinding(t *testing.T) {
 	// Fake outbound detector: pretends the CLI has a fixed LAN IP regardless
 	// of which server it dials.

@@ -212,12 +212,9 @@ func TestFetchFromSkillsSh_LogsSubdirectoryFailures(t *testing.T) {
 		slog.SetDefault(prev)
 	})
 
-	result, err := fetchFromSkillsSh(client, "https://skills.sh/acme/skills/pptx")
-	if err != nil {
-		t.Fatalf("fetchFromSkillsSh: %v", err)
-	}
-	if len(result.files) != 0 {
-		t.Fatalf("expected no files when subdirectory listing fails, got %v", importedFilePaths(result.files))
+	_, err := fetchFromSkillsSh(client, "https://skills.sh/acme/skills/pptx")
+	if err == nil || !strings.Contains(err.Error(), "list supporting directory") {
+		t.Fatalf("fetchFromSkillsSh error = %v, want fail-closed supporting-directory error", err)
 	}
 
 	logOutput := logs.String()
@@ -389,8 +386,11 @@ func TestFetchFromSkillsSh_ResolvesRootLevelSkillMd(t *testing.T) {
 	if !equalStrings(gotPaths, wantPaths) {
 		t.Fatalf("files = %v, want %v", gotPaths, wantPaths)
 	}
-	if !containsString(*requests, "api.github.com /repos/alchaincyf/huashu-design/contents?ref=master") {
-		t.Fatalf("expected root contents listing, got %v", *requests)
+	if !containsString(*requests, "api.github.com /repos/alchaincyf/huashu-design/git/trees/master?recursive=1") {
+		t.Fatalf("expected tree-first repository listing, got %v", *requests)
+	}
+	if containsString(*requests, "api.github.com /repos/alchaincyf/huashu-design/contents?ref=master") {
+		t.Fatalf("tree-first import should not crawl root contents, got %v", *requests)
 	}
 }
 
@@ -619,4 +619,31 @@ func containsString(values []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func TestCollectGitHubFilesStopsAtFileLimit(t *testing.T) {
+	t.Parallel()
+	entries := make([]githubContentEntry, maxImportFileCount+1)
+	for i := range entries {
+		entries[i] = githubContentEntry{Name: "file.txt", Path: "file.txt", Type: "file"}
+	}
+	var files []githubContentEntry
+	err := collectGitHubFiles(http.DefaultClient, entries, &files, "https://api.github.test/root", &githubCrawlBudget{}, 0)
+	if err == nil || !strings.Contains(err.Error(), "supporting files") {
+		t.Fatalf("collectGitHubFiles() error = %v, want file limit error", err)
+	}
+	if len(files) != maxImportFileCount {
+		t.Fatalf("collected %d files, want stop at %d", len(files), maxImportFileCount)
+	}
+}
+
+func TestFetchRawFileRejectsOversizedBody(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(bytes.Repeat([]byte("x"), maxImportFileSize+1))
+	}))
+	defer server.Close()
+	if _, err := fetchRawFile(server.Client(), server.URL); err == nil || !strings.Contains(err.Error(), "exceeds") {
+		t.Fatalf("fetchRawFile() error = %v, want oversized rejection", err)
+	}
 }

@@ -366,10 +366,12 @@ func TestMergeEnvFiltersClaudeCodeVars(t *testing.T) {
 		"CLAUDECODE=1",
 		"CLAUDE_CODE_ENTRYPOINT=cli",
 		"CLAUDECODEX=keep-me",
+		"MULTICA_TOKEN=ambient-owner-token",
+		"multica_server_url=http://ambient.invalid",
 	}, map[string]string{"FOO": "bar"})
 
 	for _, entry := range env {
-		if entry == "CLAUDECODE=1" || entry == "CLAUDE_CODE_ENTRYPOINT=cli" {
+		if entry == "CLAUDECODE=1" || entry == "CLAUDE_CODE_ENTRYPOINT=cli" || strings.HasPrefix(strings.ToUpper(entry), "MULTICA_") {
 			t.Fatalf("expected CLAUDECODE vars to be filtered, got %v", env)
 		}
 	}
