@@ -102,7 +102,7 @@ func (d *Daemon) runTaskWakeupConnection(ctx context.Context, runtimeIDs []strin
 	// Serialize all writes through a single channel: the gorilla/websocket
 	// Conn does not allow concurrent WriteMessage calls, and the heartbeat
 	// sender now coexists with future server-initiated writes.
-	writes := make(chan []byte, 8)
+	writes := make(chan []byte, wsWriteQueueCapacity(len(runtimeIDs)))
 	writerDone := make(chan struct{})
 	go d.runWSWriter(conn, writes, writerDone)
 
@@ -143,6 +143,14 @@ func (d *Daemon) runTaskWakeupConnection(ctx context.Context, runtimeIDs []strin
 	case err := <-errCh:
 		return err
 	}
+}
+
+func wsWriteQueueCapacity(runtimeCount int) int {
+	const minimumCapacity = 8
+	if runtimeCount > minimumCapacity {
+		return runtimeCount
+	}
+	return minimumCapacity
 }
 
 // runWSWriter funnels writes from the heartbeat sender (and any future
